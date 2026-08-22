@@ -1,0 +1,19 @@
+[package]
+name = "abr_relational_attention"
+version = "0.1.0"
+edition = "2021"
+authors = ["Metatron Dynamics, Inc."]
+description = "ABR relational attention — accumulation rule replacing softmax attention"
+license = "Apache-2.0"
+
+[[bin]]
+name = "abr_relational_attention"
+path = "src/main.rs"
+
+[lib]
+name = "abr_relational_attention"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]

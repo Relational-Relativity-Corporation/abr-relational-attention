@@ -38,7 +38,7 @@
 
 use crate::declaration::{
     Locus, RelationalPair, VocabTable,
-    COHERENCE_WINDOW,
+    COHERENCE_WINDOW, ETA,
 };
 use crate::accumulation::EdgeStore;
 use crate::operators::operator_a;
@@ -74,28 +74,49 @@ pub struct StreamingField {
     /// Window-restricted accumulation: only token pairs within w positions
     /// of each other accumulate binding. OC-RA-5.
     window: usize,
+
+    /// Learning rate η. Declared ETA by default; overridable for calibration (OC-RA-2).
+    eta: f64,
 }
 
 impl StreamingField {
-    /// Create a new streaming field with the declared coherence window.
+    /// Create a new streaming field with declared coherence window and declared ETA.
     pub fn new() -> Self {
         Self {
             stream:   Vec::new(),
             frontier: 0,
             store:    EdgeStore::new(),
             window:   COHERENCE_WINDOW as usize,
+            eta:      ETA,
         }
     }
 
-    /// Create a new streaming field with an explicit window (for calibration).
+    /// Create a new streaming field with an explicit window (for window calibration).
     pub fn with_window(window: usize) -> Self {
         Self {
             stream:   Vec::new(),
             frontier: 0,
             store:    EdgeStore::new(),
             window,
+            eta:      ETA,
         }
     }
+
+    /// Create a new streaming field with explicit η and window (for OC-RA-2 calibration).
+    /// Does not modify the declared ETA constant. Calibration use only.
+    pub fn with_params(eta: f64, window: usize) -> Self {
+        debug_assert!(eta > 0.0 && eta <= 1.0, "η must be in (0,1]");
+        Self {
+            stream:   Vec::new(),
+            frontier: 0,
+            store:    EdgeStore::new(),
+            window,
+            eta,
+        }
+    }
+
+    /// Return the η this field accumulates at.
+    pub fn eta(&self) -> f64 { self.eta }
 
     /// Return the current frontier position (number of tokens arrived).
     pub fn frontier(&self) -> usize {
@@ -120,12 +141,13 @@ impl StreamingField {
         //   - Declare the relational pair (stream[i], locus)
         //   - Compute A[e] = M(src) - M(tgt), then ρₙ = ρ_base · χ/(1+χ)
         //   - Update EdgeStore (accumulation rule applied once)
+        let eta = self.eta;
         for i in window_start..j {
             let src = self.stream[i];
             // Causal pair: source position i < target position j (guaranteed here)
             if let Some(pair) = RelationalPair::declare(src, locus) {
                 let rho_n = operator_a_to_rho_n(&pair, vocab);
-                self.store.update(&pair, rho_n);
+                self.store.update_with_eta(&pair, rho_n, eta);
             }
         }
 

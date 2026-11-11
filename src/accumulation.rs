@@ -82,10 +82,19 @@ impl EdgeStore {
 
     /// Update binding for a declared pair given a new ρₙ observation.
     /// Creates entry if not yet seen (cold start admissible on first step).
+    /// Uses declared ETA from declaration.rs.
     pub fn update(&mut self, pair: &RelationalPair, rho_n: f64) {
         let key = pair.token_key(); // (source.token_id, target.token_id)
         let binding = self.edges.entry(key).or_insert_with(AccumulatedBinding::new);
         binding.accumulate(rho_n, ETA);
+    }
+
+    /// Update binding with an explicit η (for calibration sweeps, OC-RA-2).
+    /// Does not modify the declared ETA constant — calibration only.
+    pub fn update_with_eta(&mut self, pair: &RelationalPair, rho_n: f64, eta: f64) {
+        let key = pair.token_key();
+        let binding = self.edges.entry(key).or_insert_with(AccumulatedBinding::new);
+        binding.accumulate(rho_n, eta);
     }
 
     /// Return admitted source token_ids and their ρ_acc for a given target token_id.

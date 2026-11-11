@@ -88,10 +88,31 @@ pub type VocabTable = Vec<Vec<f64>>;
 /// dim: embedding dimension.
 /// Each token gets a unit vector — traceable to its declared identity.
 pub fn build_vocab_table(vocab_size: usize, dim: usize) -> VocabTable {
-    (0..vocab_size).map(|id| {
-        let mut emb = vec![0.0_f64; dim];
-        emb[id % dim] = 1.0;
-        emb
+    build_vocab_table_seeded(vocab_size, dim, 0)
+}
+
+/// Build a vocabulary embedding table with an explicit LCG seed.
+///
+/// Each entry is in D = [0,1]^dim.  Seed = 0 produces the same table as
+/// build_vocab_table (identity basis vectors for the first dim tokens, then
+/// wrapped).  Non-zero seeds produce distinct pseudo-random tables — used by
+/// multi-head ABR to give each head a different declared M.
+pub fn build_vocab_table_seeded(vocab_size: usize, dim: usize, seed: u64) -> VocabTable {
+    if seed == 0 {
+        return (0..vocab_size).map(|id| {
+            let mut emb = vec![0.0_f64; dim];
+            emb[id % dim] = 1.0;
+            emb
+        }).collect();
+    }
+    // LCG pseudo-random in [0,1]^dim per token
+    let mut state = seed;
+    (0..vocab_size).map(|_| {
+        (0..dim).map(|_| {
+            state = state.wrapping_mul(6364136223846793005)
+                         .wrapping_add(1442695040888963407);
+            (state >> 33) as f64 / (u32::MAX as f64)
+        }).collect()
     }).collect()
 }
 

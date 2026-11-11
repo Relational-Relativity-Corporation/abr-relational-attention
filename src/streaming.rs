@@ -229,14 +229,27 @@ impl StreamingField {
         let b_field = apply_operator_b(&edges, &local_ids, vocab, dim);
         let r_field = apply_operator_r(&b_field, &edges, &local_ids, vocab, dim);
 
-        // Aggregate at target position (last in window = position)
+        // Aggregate at target position (last in window = position).
+        //
+        // DOMAIN MAINTENANCE: compute the MEAN R-field over admitted edges at
+        // the target position, not the sum.  Each R-vector component traces to
+        // M ∈ [0,1]^dim through declared operators, so the mean is bounded.
+        // A sum would be O(k) and violate D = [0,1]^dim as k grows.
+        // Analogous to softmax attention: output = Σ attn_weight · V, where
+        // Σ attn_weight = 1 (normalized).  Here: output = (1/k) Σ R[i→pos].
         let mut output = vec![0.0_f64; dim];
+        let mut n_at_target = 0_usize;
         for (ei, &(_, tp)) in edges.iter().enumerate() {
             if tp == n_w - 1 {
                 for d in 0..dim {
                     output[d] += r_field[ei * dim + d];
                 }
+                n_at_target += 1;
             }
+        }
+        if n_at_target > 1 {
+            let inv = 1.0 / n_at_target as f64;
+            for v in &mut output { *v *= inv; }
         }
 
         (output, n_edges)

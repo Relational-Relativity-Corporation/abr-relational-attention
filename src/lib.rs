@@ -9,3 +9,4 @@ pub mod operators;
 pub mod accumulation;
 pub mod attention;
 pub mod streaming;
+pub mod attention_layer;

@@ -30,6 +30,10 @@ path = "src/bin/glove_demo.rs"
 name = "stack_demo"
 path = "src/bin/stack_demo.rs"
 
+[[bin]]
+name = "wo_demo"
+path = "src/bin/wo_demo.rs"
+
 [lib]
 name = "abr_relational_attention"
 path = "src/lib.rs"

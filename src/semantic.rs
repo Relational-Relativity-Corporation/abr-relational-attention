@@ -238,6 +238,55 @@ impl SemanticM {
 
     /// Clones the VocabTable (needed to pass to AttentionLayer::forward).
     pub fn to_vocab_table(&self) -> VocabTable { self.embeddings.clone() }
+
+    /// Load from a GloVe-format text file (word followed by space-separated floats).
+    ///
+    /// Format: each line is "<word> <f1> <f2> ... <fd>\n"
+    /// (standard GloVe, word2vec text, FastText text format)
+    ///
+    /// Applies per-dimension min-max normalization to satisfy D = [0,1]^dim.
+    /// Words not in the file return the <unk> embedding (0.5 in all dims).
+    ///
+    /// max_vocab: if > 0, load only the first max_vocab words (they are sorted
+    /// by frequency in standard GloVe files — highest frequency first).
+    pub fn from_glove_file(path: &str, max_vocab: usize) -> Result<Self, String> {
+        use std::io::{BufRead, BufReader};
+        use std::fs::File;
+
+        let file = File::open(path)
+            .map_err(|e| format!("cannot open {}: {}", path, e))?;
+        let reader = BufReader::new(file);
+
+        let mut words: Vec<String> = Vec::new();
+        let mut raw: Vec<Vec<f64>> = Vec::new();
+        let mut dim: Option<usize> = None;
+
+        for (line_num, line) in reader.lines().enumerate() {
+            if max_vocab > 0 && words.len() >= max_vocab { break; }
+            let line = line.map_err(|e| format!("read error at line {}: {}", line_num, e))?;
+            let mut parts = line.split_whitespace();
+            let word = match parts.next() {
+                Some(w) => w.to_string(),
+                None    => continue,
+            };
+            let vec: Vec<f64> = parts
+                .map(|s| s.parse::<f64>().unwrap_or(0.0))
+                .collect();
+            if vec.is_empty() { continue; }
+            match dim {
+                None    => { dim = Some(vec.len()); }
+                Some(d) => { if vec.len() != d { continue; } } // skip malformed lines
+            }
+            words.push(word);
+            raw.push(vec);
+        }
+
+        if raw.is_empty() {
+            return Err(format!("no embeddings loaded from {}", path));
+        }
+
+        Ok(Self::from_raw(raw, words))
+    }
 }
 
 /// Tokenize text into lowercase word tokens.

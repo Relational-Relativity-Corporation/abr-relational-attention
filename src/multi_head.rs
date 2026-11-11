@@ -222,6 +222,7 @@ pub fn build_multi_head_vocabs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
     use crate::declaration::build_vocab_table;
 
     fn two_head_vocabs(vocab_size: usize, dim: usize) -> Vec<VocabTable> {

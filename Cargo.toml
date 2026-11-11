@@ -10,6 +10,22 @@ license = "Apache-2.0"
 name = "abr_relational_attention"
 path = "src/main.rs"
 
+[[bin]]
+name = "architecture_demo"
+path = "src/bin/architecture_demo.rs"
+
+[[bin]]
+name = "multi_head_demo"
+path = "src/bin/multi_head_demo.rs"
+
+[[bin]]
+name = "semantic_demo"
+path = "src/bin/semantic_demo.rs"
+
+[[bin]]
+name = "glove_demo"
+path = "src/bin/glove_demo.rs"
+
 [lib]
 name = "abr_relational_attention"
 path = "src/lib.rs"

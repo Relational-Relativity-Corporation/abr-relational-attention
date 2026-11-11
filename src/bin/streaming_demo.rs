@@ -163,17 +163,14 @@ fn main() {
 
     // ── θ_min sweep on streaming result ──────────────────────────────────────
     println!("θ_min sweep (after single-pass streaming of A+B):");
-    println!("  {:>6} | {:>8} | {:>7} | {:>10}", "θ_min", "admitted", "admit%", "admitted");
+    println!("  {:>6} | {:>8} | {:>7}", "θ_min", "admitted", "admit%");
+    println!("  {:>6} | {:>8} | {:>7}", "──────", "────────", "───────");
     let total_edges = field.store.total_edges();
-    // Note: EdgeStore only exposes admitted_edges() at THETA_MIN; for sweep
-    // we report the actual admitted count at theta via admitted_edges() override.
-    // For Phase 1 demo, we report at the declared threshold only and note the sweep
-    // was validated in Python (streaming_field.py).
-    println!("  {:>6.2} | {:>8} | {:>6.1}% | (Python sweep: θ=0.10→14.4%, θ=0.20→4.9%)",
-             THETA_MIN,
-             field.store.admitted_edges(),
-             100.0 * field.store.admitted_edges() as f64 / total_edges as f64);
-    println!("  (Full θ_min sweep validated in Python streaming_field.py — see DECLARATION.md)");
+    for &theta in &[0.01_f64, 0.05, 0.10, 0.15, 0.20, 0.30, 0.50] {
+        let n_adm = field.store.admitted_edges_at_threshold(theta);
+        println!("  {:>6.2} | {:>8} | {:>6.1}%",
+                 theta, n_adm, 100.0 * n_adm as f64 / total_edges as f64);
+    }
     println!();
 
     // ── Window restriction diagnostic ─────────────────────────────────────────
@@ -239,6 +236,15 @@ fn main() {
     println!("    At n=10000: ABR = {:.4}× O(n²)",
              (0..10000_usize).map(|j| j.min(COHERENCE_WINDOW as usize)).sum::<usize>() as f64
              / (10000_usize * 9999 / 2) as f64);
+    println!();
+    println!("  θ_min as recurrence discriminator (declared finding, Phase 1):");
+    println!("    At θ=0.05: all pairs from any sequence admitted.");
+    println!("    At θ=0.10: only the 28 pairs seen in BOTH A and B survive.");
+    println!("    The 8 shared tokens (4–11) produce 8×7/2=28 cross-sequence pairs.");
+    println!("    One exposure → ρ_acc=0.050. Two exposures → ρ_acc=0.095.");
+    println!("    θ_min is a recurrence depth filter, not a soft threshold.");
+    println!("    Setting θ_min above ρ_acc(1_exposure) selects structurally");
+    println!("    recurring relations — not just frequent ones.");
     println!();
     println!("  Admissibility: all quantities bounded in D = [0,1]^dim.");
     println!("  Novel tokens produce output = 0 (declared state, not error).");

@@ -124,6 +124,26 @@ impl EdgeStore {
             .map(|(&(s, t), _)| (s, t))
             .collect()
     }
+
+    /// Return all token-identity pairs admitted at an explicit threshold.
+    /// Unlike all_admitted_pairs() which is pinned to the declared THETA_MIN,
+    /// this method accepts any theta ∈ [0,1] for calibration sweeps (OC-RA-1).
+    ///
+    /// Phase 2 optimization: maintain an admitted_set updated incrementally.
+    /// Phase 1 cost: O(|edges|) scan per call — acceptable for calibration.
+    pub fn all_admitted_pairs_at_threshold(&self, theta: f64) -> Vec<(usize, usize)> {
+        debug_assert!(theta >= DOMAIN_LOWER && theta <= DOMAIN_UPPER);
+        self.edges
+            .iter()
+            .filter(|(_, b)| b.rho_acc >= theta)
+            .map(|(&(s, t), _)| (s, t))
+            .collect()
+    }
+
+    /// Count admitted edges at an explicit threshold (for θ_min sweep).
+    pub fn admitted_edges_at_threshold(&self, theta: f64) -> usize {
+        self.edges.values().filter(|b| b.rho_acc >= theta).count()
+    }
 }
 
 #[cfg(test)]

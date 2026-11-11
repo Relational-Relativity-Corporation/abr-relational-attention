@@ -353,30 +353,6 @@ fn apply_operator_r(
     r_flat
 }
 
-// ── EdgeStore extension for threshold-based lookup ────────────────────────────
-// Extends EdgeStore with a method needed by inference_at.
-// This is added here rather than in accumulation.rs to avoid circular dependency.
-
-impl EdgeStore {
-    /// Return all admitted (source_token_id, target_token_id) pairs
-    /// at a given threshold (generalisation of `all_admitted_pairs`).
-    pub fn all_admitted_pairs_at_threshold(&self, _theta: f64) -> Vec<(usize, usize)> {
-        // Delegate to the existing method with THETA_MIN override via ad-hoc scan.
-        // Note: EdgeStore stores bindings keyed by (src, tgt). We scan for theta.
-        // This is a convenience method for inference_at. Production use should
-        // maintain a pre-filtered admitted set for O(1) lookup.
-        //
-        // For Phase 1 correctness this O(|edges|) scan is acceptable.
-        // Phase 2 optimization: maintain admitted_set as a HashSet<(usize,usize)>
-        // updated incrementally on each accumulate() call.
-        self.all_admitted_pairs() // uses THETA_MIN from declaration.rs
-            // If theta != THETA_MIN we need the full scan; use all_admitted_pairs
-            // when theta == THETA_MIN for now. This is a known limitation.
-            // TODO Phase 2: parameterize admitted_edges() and all_admitted_pairs()
-            //               by explicit threshold.
-    }
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -153,6 +153,12 @@ impl EdgeStore {
     pub fn admitted_edges_at_threshold(&self, theta: f64) -> usize {
         self.edges.values().filter(|b| b.rho_acc >= theta).count()
     }
+
+    /// Return the current ρ_acc for a (source_token_id, target_token_id) pair.
+    /// Returns None if the pair has never been observed.
+    pub fn rho_acc_for_pair(&self, source_token_id: usize, target_token_id: usize) -> Option<f64> {
+        self.edges.get(&(source_token_id, target_token_id)).map(|b| b.rho_acc)
+    }
 }
 
 #[cfg(test)]

@@ -239,6 +239,47 @@ impl SemanticM {
     /// Clones the VocabTable (needed to pass to AttentionLayer::forward).
     pub fn to_vocab_table(&self) -> VocabTable { self.embeddings.clone() }
 
+    /// Build a compact VocabTable containing only the tokens that appear in
+    /// `token_ids`, plus the <unk> token at index `compact_vocab_size - 1`.
+    ///
+    /// Returns `(compact_vocab, remapped_ids)` where:
+    ///   - `compact_vocab[i]` is the embedding of the i-th unique token
+    ///   - `remapped_ids[j]` is the compact index of `token_ids[j]`
+    ///
+    /// This is a performance optimization for large pre-trained vocabularies:
+    /// a 50k-word GloVe table compacts to N_unique+1 entries (e.g., 136 for
+    /// the Darwin paragraph). The ABR kernel operates identically — only the
+    /// token_id namespace is different.
+    ///
+    /// The <unk> compact id is `compact_vocab.len() - 1`.
+    pub fn compact_vocab_for(&self, token_ids: &[usize]) -> (VocabTable, Vec<usize>) {
+        // Collect unique glove_ids in order of first appearance
+        let mut seen_order: Vec<usize> = Vec::new();
+        let mut glove_to_compact: std::collections::HashMap<usize, usize> =
+            std::collections::HashMap::new();
+
+        for &gid in token_ids {
+            if !glove_to_compact.contains_key(&gid) {
+                glove_to_compact.insert(gid, seen_order.len());
+                seen_order.push(gid);
+            }
+        }
+
+        // Build compact vocab: one embedding per unique glove_id
+        let compact_vocab: VocabTable = seen_order
+            .iter()
+            .map(|&gid| self.embeddings[gid.min(self.unk_id)].clone())
+            .collect();
+
+        // Remap token_ids
+        let remapped: Vec<usize> = token_ids
+            .iter()
+            .map(|gid| glove_to_compact[gid])
+            .collect();
+
+        (compact_vocab, remapped)
+    }
+
     /// Load from a GloVe-format text file (word followed by space-separated floats).
     ///
     /// Format: each line is "<word> <f1> <f2> ... <fd>\n"

@@ -255,6 +255,25 @@ impl StreamingField {
         (output, n_edges)
     }
 
+    /// Reset the positional stream while preserving the EdgeStore's accumulated ρ_acc.
+    ///
+    /// After reset: frontier = 0, stream = [], EdgeStore unchanged.
+    ///
+    /// This is the correct separation between:
+    ///   - Positional history (stream[]) — per-sequence, ephemeral
+    ///   - Relational field (EdgeStore)  — persistent, cross-sequence
+    ///
+    /// Use this between maturation passes when you want the same ρ_acc to gate
+    /// inference on a fresh window, without accumulating O(N×T) positional history.
+    ///
+    /// INVARIANT: ρ_acc in EdgeStore is UNCHANGED by reset_stream().
+    /// Only the positional stream (Locus positions) is discarded.
+    pub fn reset_stream(&mut self) {
+        self.stream.clear();
+        self.frontier = 0;
+        // EdgeStore (self.store) is intentionally NOT cleared.
+    }
+
     /// Current token count in the stream.
     pub fn stream_len(&self) -> usize {
         self.stream.len()
@@ -340,7 +359,6 @@ fn apply_operator_r(
     vocab: &VocabTable,
     dim: usize,
 ) -> Vec<f64> {
-    let _n_edges = edges.len();
     let n_nodes = local_ids.len();
 
     // Build tgt_to_edges and src_to_edges indices
@@ -352,21 +370,23 @@ fn apply_operator_r(
     }
 
     // ρ per node: ρ[i] = max|A| over incident edges / (1 + max|A|)
+    //
+    // PERFORMANCE FIX: iterate edges once — O(n_edges × dim) — not O(n_nodes × n_edges × dim).
+    // For each edge (sp, tp), compute |A| once and update both endpoint nodes.
+    // The original O(n_nodes × n_edges) loop is equivalent: for each node i,
+    // find all incident edges. This scan finds the same set without the quadratic scan.
     let mut rho_node = vec![0.0_f64; n_nodes];
-    for i in 0..n_nodes {
-        let mut chi = 0.0_f64;
-        for &(sp, tp) in edges {
-            if sp == i || tp == i {
-                let pair = RelationalPair::declare(
-                    Locus::new(sp, local_ids[sp]),
-                    Locus::new(tp, local_ids[tp]),
-                ).unwrap();
-                let a = operator_a(&pair.source, &pair.target, vocab);
-                let local_chi: f64 = a.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
-                chi = chi.max(local_chi);
-            }
-        }
-        rho_node[i] = chi / (1.0 + chi);
+    for &(sp, tp) in edges {
+        let pair = RelationalPair::declare(
+            Locus::new(sp, local_ids[sp]),
+            Locus::new(tp, local_ids[tp]),
+        ).unwrap();
+        let a = operator_a(&pair.source, &pair.target, vocab);
+        let chi: f64 = a.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+        let rho = chi / (1.0 + chi);
+        // ρ[node] = max over all incident edges (source or target)
+        if rho > rho_node[sp] { rho_node[sp] = rho; }
+        if rho > rho_node[tp] { rho_node[tp] = rho; }
     }
 
     // R[e] = B[e] + ρ[src(e)] * (Σ_succ B[f] - Σ_pred B[f])
@@ -524,6 +544,54 @@ mod tests {
         assert_eq!(n_e, 0, "no edges admitted for a solo token");
         assert!(out.iter().all(|&v| v == 0.0),
             "novel token with no admitted history must produce zero output");
+    }
+
+    #[test]
+    fn test_reset_stream_clears_frontier_keeps_edges() {
+        // After reset_stream: frontier=0, stream empty, EdgeStore unchanged.
+        let vocab = small_vocab();
+        let mut f = StreamingField::new();
+        f.arrive_sequence(&[0, 1, 2, 3], &vocab);
+        let edges_before = f.store.total_edges();
+        assert!(f.frontier() > 0, "frontier must advance after arrivals");
+
+        f.reset_stream();
+
+        assert_eq!(f.frontier(), 0, "reset must clear the frontier");
+        assert_eq!(f.stream_len(), 0, "reset must clear the stream");
+        assert_eq!(f.store.total_edges(), edges_before,
+            "reset must NOT clear the EdgeStore — ρ_acc must be preserved");
+    }
+
+    #[test]
+    fn test_reset_stream_rho_acc_persists() {
+        // ρ_acc for a pair should be the same before and after reset_stream.
+        let vocab = small_vocab();
+        let mut f = StreamingField::new();
+        f.arrive_sequence(&[0, 1, 2], &vocab);
+        // Get ρ_acc for pair (0,1) before reset
+        let rho_before = f.store.rho_acc_for_pair(0, 1);
+        assert!(rho_before.is_some(), "pair (0,1) should exist after streaming");
+
+        f.reset_stream();
+        let rho_after = f.store.rho_acc_for_pair(0, 1);
+        assert_eq!(rho_before, rho_after,
+            "reset_stream must not change ρ_acc in the EdgeStore");
+    }
+
+    #[test]
+    fn test_reset_stream_then_arrive_works() {
+        // After reset, the field should accept new arrivals starting from position 0.
+        let vocab = small_vocab();
+        let mut f = StreamingField::new();
+        f.arrive_sequence(&[0, 1], &vocab);
+        f.reset_stream();
+        // Should be able to arrive again without panic
+        f.arrive_sequence(&[0, 1], &vocab);
+        assert_eq!(f.frontier(), 2, "after reset + re-stream, frontier should be 2");
+        // The pair (0,1) should now have been seen twice total (ρ_acc higher)
+        let rho = f.store.rho_acc_for_pair(0, 1).unwrap_or(0.0);
+        assert!(rho > 0.0, "pair (0,1) must have nonzero ρ_acc after two streams");
     }
 
     #[test]

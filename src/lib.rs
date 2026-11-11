@@ -12,3 +12,4 @@ pub mod streaming;
 pub mod attention_layer;
 pub mod multi_head;
 pub mod semantic;
+pub mod layer_stack;

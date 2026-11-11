@@ -26,6 +26,10 @@ path = "src/bin/semantic_demo.rs"
 name = "glove_demo"
 path = "src/bin/glove_demo.rs"
 
+[[bin]]
+name = "stack_demo"
+path = "src/bin/stack_demo.rs"
+
 [lib]
 name = "abr_relational_attention"
 path = "src/lib.rs"

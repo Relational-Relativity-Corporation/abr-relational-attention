@@ -183,6 +183,14 @@ impl AttentionLayer {
         outputs
     }
 
+    /// Reset positional stream while preserving the EdgeStore's accumulated ρ_acc.
+    ///
+    /// See StreamingField::reset_stream for the invariant.
+    /// Use between maturation passes to prevent O(N×T) positional accumulation.
+    pub fn reset_stream(&mut self) {
+        self.field.reset_stream();
+    }
+
     /// Total tokens processed by this layer (frontier position).
     pub fn tokens_processed(&self) -> usize {
         self.field.frontier()

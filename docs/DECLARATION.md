@@ -191,6 +191,14 @@ dominance of the random baseline at 500 epochs reflects this memorization
 property. The meaningful comparison is ABR vs GloVe: both use token-type
 representations and neither enables position memorization.
 
+**Later layers receive whole-paragraph context (declared exploratory condition).**
+Each layer's M is derived from the layer below via contextualize_m
+(layer_stack.rs): M_{L+1}[t] = mean R-field over all positions of token type t
+in the full paragraph. This aggregation is not causal — it uses every position
+of token t regardless of sequence order. Later layers therefore receive
+whole-paragraph context. This is a declared property of the layer stack in its
+current exploratory form; a streaming causal M-derivation is not implemented.
+
 **ABR vs GloVe comparison (training fit).** ABR R-field achieves lower
 training loss than GloVe (pplx 10.7 vs 57.6, 5.37×) on the Darwin paragraph
 under the declared exploratory conditions. This measures the R-field's
@@ -238,7 +246,14 @@ establish held-out generalization.
     rho_acc(ti, tj) <- rho_acc(ti, tj) + eta * rho_n(i,j) * (1 - rho_acc(ti, tj))
 
     rho_n(i, j) = ρ_base · χ_n / (χ₀ + χ_n)
-    χ_n = max |A[e]| over edges incident at node i in the current sequence context
+    χ_n = max component |A(ti, tj)| — the directed contrast of the specific pair only
+
+rho_n is computed from the A vector of the pair being accumulated, not from
+the per-node max over all incident edges. Per-pair chi captures the
+contrast of that specific token relationship; it differs from the per-node
+chi used in the R operator (which takes max over all edges incident at a node
+to scale the antisymmetric term). Both are chi-based; they are evaluated at
+different granularities for different purposes.
 
 Keyed by token-identity pair (ti, tj). Persists across sequences.
 Stability: (1 - rho_acc) bounds rho_acc in [0, 1). eta in (0, 1).

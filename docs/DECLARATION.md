@@ -1,4 +1,4 @@
-# ABR Relational Attention -- M Declaration V4.1
+# ABR Relational Attention -- M Declaration V4.2
 **Metatron Dynamics, Inc. -- 2026-11-12**
 **Kernel: V9 (kernel_reference.md 2026-10-24)**
 **Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared**
@@ -97,10 +97,10 @@ sum alternatives scale with degree. Max brackets the range without degree
 dependence. Means are avoided whenever possible throughout this framework:
 a mean discards the structure of the distribution; a selection preserves it.
 
-Domain context: GloVe-50d embeddings are min-max normalized to [0,1]^dim,
-so chi = max|A[e]| ∈ [0, 1]. The saturating form achieves its midpoint at
-chi = χ₀ = 1 (the domain ceiling), making χ₀=1 commensurate with the
-declared chi range.
+Domain context: GloVe-50d and PPMI-derived (SemanticM::from_corpus) embeddings
+are min-max normalized to [0,1]^dim, so chi = max|A[e]| ∈ [0, 1]. The
+saturating form achieves its midpoint at chi = χ₀ = 1 (the domain ceiling),
+making χ₀=1 commensurate with the declared chi range.
 
 ρ_base and χ₀ are M-declared parameters; see Declared Parameters.
 
@@ -232,8 +232,8 @@ establish held-out generalization.
 |-------------|-------------|---------|-------------------------------------------------------------------------------------------------------------|
 | Learning    | eta         | 0.1     | OC-RA-2 partially closed                                                                                    |
 | Threshold   | theta_min   | 0.05    | OC-RA-1 partially closed                                                                                    |
-| Ceiling     | ρ_base      | 1.0     | Language domain. V9 general value: 0.5. Declared 1.0: GloVe-50d embeddings are min-max normalized to [0,1]^dim; chi = max\|A[e]\| ∈ [0,1]. With χ₀=1: ρ_base=0.5 → ρ_max=0.25; ρ_base=1.0 → ρ_max=0.50. Declaring 1.0 uses the available chi range proportionally (doubles the ceiling). No claim that 0.25 is insufficient. Reason recorded per V9 §9. |
-| Reference   | χ₀          | 1       | Language domain. V9 general value: 1 unit of χ. Declared as 1 unit of GloVe-50d embedding distance. χ is dimensionless in normalized GloVe space; χ₀=1 is one unit of that space. |
+| Ceiling     | ρ_base      | 1.0     | Language domain. V9 general value: 0.5. Declared 1.0: GloVe-50d and PPMI-derived (SemanticM) embeddings are min-max normalized to [0,1]^dim; chi = max\|A[e]\| ∈ [0,1]. With χ₀=1: ρ_base=0.5 → ρ_max=0.25; ρ_base=1.0 → ρ_max=0.50. Declaring 1.0 uses the available chi range proportionally (doubles the ceiling). No claim that 0.25 is insufficient. Reason recorded per V9 §9. |
+| Reference   | χ₀          | 1       | Language domain. V9 general value: 1 unit of χ. Declared as 1 unit of normalized embedding distance ([0,1]^dim space; applies to GloVe-50d and PPMI-derived SemanticM). χ is dimensionless in this normalized space; χ₀=1 is one unit of that space. |
 | Stability   | eps         | 1e-8    | Implementation tolerance; not a system property. Retained in rho_acc update only. |
 | W_O lr      | Adam lr     | 1e-3    | Standard Adam learning rate for vocabulary projection.                                                       |
 | W_O β₁      | 0.9         | 0.9     | Standard Adam first moment decay.                                                                            |
@@ -274,11 +274,99 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 
 - OC-RA-1: theta_min calibration (Phase 1)
 - OC-RA-2: eta calibration (Phase 1)
-- OC-RA-3: generalisation -- held-out validation (Phase 1)
+- OC-RA-3: generalisation -- held-out validation (Phase 1) -- **CLOSED** (OC-RA-3 benchmark, 2026-11-12; see below)
 - OC-RA-4: bidirectional direction -- not declared
 - OC-RA-5: window-restricted O(n*k) accumulation (Phase 1)
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
 - OC-RA-7: saturating form χ/(χ₀+χ) -- **CLOSED** (Origin declaration, 2026-11-12)
+
+---
+
+## OC-RA-3 Benchmark Declaration (Held-Out Validation)
+
+**Status: CLOSED — result obtained 2026-11-12**
+**Binary: src/bin/held_out_benchmark.rs**
+
+### Protocol
+
+| Parameter       | Value                                                           |
+|-----------------|-----------------------------------------------------------------|
+| Corpus          | WikiText-2 (pytorch/examples)                                   |
+| Train tokens    | first 10,000 tokens of train.txt                               |
+| Test tokens     | first 3,000 tokens of test.txt (held out; W_O frozen)          |
+| M               | PPMI corpus-derived (SemanticM::from_corpus)                   |
+| M dim / window  | dim=50, window=5, min_count=5                                   |
+| M vocabulary    | 407 words (built from first ~80K chars of train only)           |
+| OOV rate (test) | 40.4% (test tokens not in train vocab → unk_id)                 |
+| Accumulation    | single-pass streaming, no replay (OC-RA-5 compliant)           |
+| Chunk size      | 4000 tokens (MAX_SEQUENCE_LENGTH=4096 hard limit; ~0.025% pairs missed at boundaries) |
+| ETA / THETA_MIN | 0.1 / 0.05                                                      |
+| Coherence W     | 64                                                              |
+| W_O training    | Adam(lr=0.001), 150 epochs, cross-entropy                       |
+| Baseline        | Direct M — W_O on raw PPMI M(token), no ABR operators (same M, same W_O init, same training protocol) |
+
+### Results
+
+| Condition    | Loss   | Perplexity | Top-1 Acc | Top-5 Acc |
+|--------------|--------|------------|-----------|-----------|
+| ABR train    | 5.6973 | 298.1      | 10.6%     | 25.2%     |
+| ABR test     | 5.4696 | 237.4      | 15.6%     | 34.3%     |
+| Direct train | 4.9452 | 140.5      | 27.9%     | 50.0%     |
+| Direct test  | 4.6088 | 100.4      | 38.4%     | 56.4%     |
+
+EdgeStore after 10,000 train tokens: 49,218 total edges; 29,074 admitted at theta=0.05.
+
+Generalisation gap (test − train loss): ABR −0.2277, Direct −0.3364 (underfitting, not overfitting).
+
+**ABR advantage over Direct M (positive = ABR better):**
+  Test  loss delta: −0.8608 (Direct M is better on held-out).
+  Train loss delta: −0.7521 (Direct M is better on train).
+
+### Declared Finding
+
+**Direct M test perplexity (100.4) < ABR test perplexity (237.4) on this configuration.**
+
+The result is accurate for the stated conditions. It does not refute ABR — it records the
+performance boundary of this parameter regime.
+
+**Declared causes of ABR underperformance in this configuration:**
+
+1. **High OOV rate (40.4%).** M vocabulary was built from first ~80K characters of train
+   only (a subset to control W_O matrix size). Test tokens outside that vocabulary receive
+   the unk embedding (0.5 in all dims). With 40.4% of test tokens collapsed to a single
+   vector, the R-field loses most relational structure on test. Direct M is equally affected
+   by OOV, but its representations are not modified by ABR operators, so the uniform unk
+   embedding passes through cleanly. ABR operators amplify the uniform signal through
+   the succ/pred structure and may distort it.
+
+2. **Small corpus (10,000 train tokens).** Insufficient for PPMI co-occurrence statistics
+   to reflect meaningful relational geometry. R-field accumulation depends on observed
+   pair exposures; with 10K tokens and a 407-word vocabulary the EdgeStore is sparse
+   relative to what PPMI-grounded ABR requires.
+
+3. **R-field scaling at initialization.** At epoch 0, ABR perplexity was 5.1×10^12 vs
+   Direct M 412 — a ratio of ~12 billion. This indicates the R-field vectors at initialization
+   have a numerical range W_O cannot adapt to quickly. The ABR R-field is a sum of directed
+   contrasts and their imbalance residuals; without warm-up scheduling its magnitude is
+   poorly matched to W_O's Xavier-initialized weight scale. Direct M passes normalized [0,1]
+   vectors directly to W_O, which Xavier init handles well.
+
+**Generalisation claim bounded to declared conditions.** Larger corpus, lower OOV rate,
+and R-field magnitude scheduling are expected to shift the comparison. No claim that
+ABR cannot generalise — only that it did not outperform Direct M under these stated conditions.
+
+**Closed-world M declaration:** PPMI vocabulary built from train text only. Test tokens
+outside train vocab receive unk treatment. This is correct protocol (no test leakage into M).
+The OOV rate is a property of the small M corpus, not a protocol violation.
+
+---
+
+## V4.1 → V4.2 Change Record
+
+| Item | V4.1 | V4.2 |
+|------|-------|-------|
+| OC-RA-3 | OPEN — held-out validation required | CLOSED — OC-RA-3 benchmark 2026-11-12: Direct M (pplx 100.4) outperforms ABR (pplx 237.4) on WikiText-2 10K-token / 407-word PPMI configuration. Result declared accurate. Causes: 40.4% OOV, small corpus, R-field scaling at init. See OC-RA-3 Benchmark Declaration section above. |
+| Domain context note | GloVe-50d embeddings only | PPMI-derived (SemanticM::from_corpus) embeddings are also min-max normalized to [0,1]^dim; ρ_base=1.0 and χ₀=1 declarations apply to both. |
 
 ---
 

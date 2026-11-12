@@ -34,6 +34,10 @@ path = "src/bin/stack_demo.rs"
 name = "wo_demo"
 path = "src/bin/wo_demo.rs"
 
+[[bin]]
+name = "held_out_benchmark"
+path = "src/bin/held_out_benchmark.rs"
+
 [lib]
 name = "abr_relational_attention"
 path = "src/lib.rs"

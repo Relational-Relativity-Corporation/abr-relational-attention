@@ -1,4 +1,4 @@
-# ABR Relational Attention -- M Declaration V4.4
+# ABR Relational Attention -- M Declaration V4.5
 **Metatron Dynamics, Inc. -- 2026-11-12**
 **Kernel: V9 (kernel_reference.md 2026-10-24)**
 **Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared**
@@ -106,12 +106,49 @@ Direction is admissible: relational coherence progression (source precedes targe
 
 ### Open Conditions at This Level
 
-**ι[v] at the language region: OPEN.**
-The inertial response of a declared token to an applied relational contrast is not yet
-declared through M at the language region. What resists change at the word, sentence,
-or semantic level has not been declared. Under the declared-information rule,
-ε[e] = |Δ(ι)[e]| · 𝟙[e] is not evaluated at language edges — not
-evaluated-and-equal-to-zero; not declared through M.
+**ι[v] at the language region — Emphasis:**
+
+Origin declaration, 2026-11-12.
+
+The inertial response of a declared token to applied relational contrast is declared
+through emphasis: the degree to which a locus signals that more attention should be
+paid to it. Emphasis is the M-observable analog of ι[v] at the language region.
+
+Emphasis has a nested structure parallel to the connection and degrees of freedom
+hierarchies:
+
+    character-level: typographic formatting (bold, italic, underline)
+      word-level: ALL CAPS, italics, strong emotional vocabulary, intensifiers
+        sentence-level: exclamation (!), question (?), exclamatory structure
+          paragraph-level: paragraph breaks, visual isolation, indented structure
+            volume-level: chapter titles, section headers, bolded summary passages
+
+A locus with high emphasis carries elevated ι[v]: it signals to the relational field
+that its relational weight is greater than ambient. This is the language analog of
+inertia -- not resistance to change in the physics sense, but resistance to being
+treated as relational background.
+
+Relationship to connection: connection declares the scope within which loci are
+relationally admitted. Emphasis declares how much relational weight a locus carries
+within that scope. High-emphasis loci concentrate relational energy at their position.
+
+Tunneling: emphasis can break connection scope. A word in ALL CAPS, or a sentence
+ending in !, claims attention at a scale larger than its local scope -- it establishes
+relational connections that bypass the standard scope hierarchy. This is the tunneling
+analog: a locus whose emphasis exceeds the ambient level of its scope propagates
+relational influence beyond its declared connection boundary.
+
+**ε[e] at the language region:**
+
+ε[e] = |Δ(ι)[e]| · 𝟙[e] is now evaluable in principle. The energy of an edge is
+the magnitude of the emphasis differential across it. An edge connecting a
+high-emphasis locus to a low-emphasis locus carries elevated edge energy.
+
+ε[e] declaration through M: OPEN (OC-RA-9).
+SemanticM (PPMI) treats all tokens equally by co-occurrence frequency. Emphasis
+markers (!, ALL CAPS, italics, emotional vocabulary) are not encoded in PPMI
+co-occurrence statistics. ι[v] from emphasis is declared admissible through M but
+not yet implemented at this application level.
 
 **Connection / entanglement at the language region:**
 
@@ -404,6 +441,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
 - OC-RA-7: saturating form χ/(χ₀+χ) -- **CLOSED** (Origin declaration, 2026-11-12)
 - OC-RA-8: higher-level connection scopes (sentence, paragraph, volume) -- OPEN (declared admissible, not yet declared through M; Origin declaration 2026-11-12)
+- OC-RA-9: ι[v] / ε[e] through emphasis markers -- OPEN (declared admissible; SemanticM does not encode emphasis; Origin declaration 2026-11-12)
 
 ---
 
@@ -483,6 +521,17 @@ ABR cannot generalise — only that it did not outperform Direct M under these s
 **Closed-world M declaration:** PPMI vocabulary built from train text only. Test tokens
 outside train vocab receive unk treatment. This is correct protocol (no test leakage into M).
 The OOV rate is a property of the small M corpus, not a protocol violation.
+
+---
+
+## V4.4 → V4.5 Change Record
+
+| Item | V4.4 | V4.5 |
+|------|-------|-------|
+| ι[v] at language region | OPEN — not declared through M | CLOSED declaration (Origin, 2026-11-12): declared through emphasis — typographic (bold, italic, ALL CAPS), punctuation structure (!, ?), emotional/affective vocabulary, visual isolation. Nested parallel to DOF and connection hierarchies. |
+| Tunneling | Not addressed | Declared: emphasis exceeding ambient scope level propagates relational influence beyond declared connection boundary (scope-breaking). |
+| ε[e] at language region | Not evaluated — ι[v] undeclared | Evaluable in principle: ε[e] = \|Δ(ι)[e]\| · 𝟙[e] is now declared. ε[e] through M: OPEN (OC-RA-9) — SemanticM does not encode emphasis markers. |
+| OC-RA-9 | Not listed | OPEN: ι[v] / ε[e] through emphasis markers declared admissible, not yet implemented in M. |
 
 ---
 

@@ -1,5 +1,5 @@
-# ABR Relational Attention -- M Declaration V4.0
-**Metatron Dynamics, Inc. -- 2026-11-11**
+# ABR Relational Attention -- M Declaration V4.1
+**Metatron Dynamics, Inc. -- 2026-11-12**
 **Kernel: V9 (kernel_reference.md 2026-10-24)**
 **Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared**
 
@@ -278,7 +278,15 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-4: bidirectional direction -- not declared
 - OC-RA-5: window-restricted O(n*k) accumulation (Phase 1)
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
-- OC-RA-7: saturating form χ/(χ₀+χ) -- OPEN per V9 §11.2 (Origin declaration required)
+- OC-RA-7: saturating form χ/(χ₀+χ) -- **CLOSED** (Origin declaration, 2026-11-12)
+
+---
+
+## V4.0 → V4.1 Change Record
+
+| Item | V4.0 | V4.1 |
+|------|-------|-------|
+| OC-RA-7 | OPEN — saturating form Origin declaration required | CLOSED — Origin declaration 2026-11-12: bounded (chi/(chi_0+chi) < 1 for all finite chi, stays in D); monotone (increases with chi); midpoint at domain ceiling (chi=chi_0=1 → ρ=ρ_base/2, maximum dynamic range across declared [0,1] domain); dimensionally consistent (chi_0 carries dimension of chi); smooth and continuous (threshold alternatives are discontinuous; linear alternatives do not saturate). These properties are already stated in the ρ section above. No code change. |
 
 ---
 

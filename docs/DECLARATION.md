@@ -87,8 +87,15 @@ in D; their difference stays in D.
     χ[i] = max |A[e]| over all edges incident to node i (source or target)
 
 ρ is a per-node scalar, not per-edge. It is computed from A, not from B.
-χ[i] is a selection (the strongest local asymmetry at node i), not a sum.
 The edge form is ρ[e] = ρ[src(e)].
+
+χ max-selection rule (Origin declaration, 2026-11-11; OC-RA-6 closed):
+χ[i] is a bracketing declaration. The max establishes the numerical ceiling
+of χ[i] at each node so that ρ[i] reflects the peak declared local asymmetry
+at i. Mean alternatives compress dynamic range and are degree-sensitive;
+sum alternatives scale with degree. Max brackets the range without degree
+dependence. Means are avoided whenever possible throughout this framework:
+a mean discards the structure of the distribution; a selection preserves it.
 
 ρ_base and χ₀ are M-declared parameters; see Declared Parameters.
 
@@ -216,7 +223,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-3: generalisation -- held-out validation (Phase 1)
 - OC-RA-4: bidirectional direction -- not declared
 - OC-RA-5: window-restricted O(n*k) accumulation (Phase 1)
-- OC-RA-6: χ max-selection rule -- OPEN per V9 §11.2 (Origin declaration required)
+- OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
 - OC-RA-7: saturating form χ/(χ₀+χ) -- OPEN per V9 §11.2 (Origin declaration required)
 
 ---

@@ -220,13 +220,20 @@ pub fn get_embedding(locus: &Locus, vocab: &VocabTable) -> Embedding {
 ///
 /// M declaration (language domain):
 ///   V9 Origin general value is 0.5.
-///   Language domain declares rho_base = 1.0 to maintain appropriate numerical
-///   ratios for GloVe-50d embeddings: chi values from |M(src) - M(tgt)| span
-///   [0, ~2.0] in normalized GloVe space. With chi_0 = 1 and rho_base = 0.5,
-///   rho saturates at 0.5 × chi/(1+chi) → max 0.5 — insufficient dynamic range
-///   for the relational field to accumulate distinguishable weights across the
-///   vocabulary. rho_base = 1.0 preserves chi-proportional scaling (rho ∈ [0, 1))
-///   while keeping the saturating form ρ = rho_base · chi/(chi_0 + chi) canonical.
+///   Language domain declares rho_base = 1.0.
+///
+///   GloVe-50d embeddings are min-max normalized to [0,1]^dim at load time
+///   (semantic.rs). Component differences |M(src)[d] - M(tgt)[d]| are therefore
+///   in [0, 1], so chi = max|A[e]| ∈ [0, 1]. With chi_0 = 1:
+///
+///     rho_base = 0.5 → rho_max = 0.5 × 1/(1+1) = 0.25
+///     rho_base = 1.0 → rho_max = 1.0 × 1/(1+1) = 0.50
+///
+///   Declaring rho_base = 1.0 doubles the ceiling on rho relative to the V9
+///   general value, using the full [0, 0.5) range of the saturating form for
+///   the declared chi domain. The general value 0.5 would cap rho at 0.25 for
+///   this domain. No claim is made that 0.25 is insufficient; the choice of
+///   rho_base = 1.0 is declared to use the available chi range proportionally.
 ///   Reason recorded per V9 M-declaration requirement (kernel_reference.md §9).
 pub const RHO_BASE: f64 = 1.0;
 

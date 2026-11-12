@@ -97,6 +97,11 @@ sum alternatives scale with degree. Max brackets the range without degree
 dependence. Means are avoided whenever possible throughout this framework:
 a mean discards the structure of the distribution; a selection preserves it.
 
+Domain context: GloVe-50d embeddings are min-max normalized to [0,1]^dim,
+so chi = max|A[e]| ∈ [0, 1]. The saturating form achieves its midpoint at
+chi = χ₀ = 1 (the domain ceiling), making χ₀=1 commensurate with the
+declared chi range.
+
 ρ_base and χ₀ are M-declared parameters; see Declared Parameters.
 
 Result: ρ[i] ∈ [0, ρ_base). Zero if no edges incident at i. Saturates
@@ -219,7 +224,7 @@ establish held-out generalization.
 |-------------|-------------|---------|-------------------------------------------------------------------------------------------------------------|
 | Learning    | eta         | 0.1     | OC-RA-2 partially closed                                                                                    |
 | Threshold   | theta_min   | 0.05    | OC-RA-1 partially closed                                                                                    |
-| Ceiling     | ρ_base      | 1.0     | Language domain. V9 general value: 0.5. Declared 1.0: GloVe-50d chi values span [0, ~2.0]; ρ_base=0.5 saturates at 0.5 × chi/(1+chi) → max 0.5, insufficient dynamic range. ρ_base=1.0 preserves chi-proportional scaling (ρ ∈ [0,1)). Reason recorded per V9 §9. |
+| Ceiling     | ρ_base      | 1.0     | Language domain. V9 general value: 0.5. Declared 1.0: GloVe-50d embeddings are min-max normalized to [0,1]^dim; chi = max\|A[e]\| ∈ [0,1]. With χ₀=1: ρ_base=0.5 → ρ_max=0.25; ρ_base=1.0 → ρ_max=0.50. Declaring 1.0 uses the available chi range proportionally (doubles the ceiling). No claim that 0.25 is insufficient. Reason recorded per V9 §9. |
 | Reference   | χ₀          | 1       | Language domain. V9 general value: 1 unit of χ. Declared as 1 unit of GloVe-50d embedding distance. χ is dimensionless in normalized GloVe space; χ₀=1 is one unit of that space. |
 | Stability   | eps         | 1e-8    | Implementation tolerance; not a system property. Retained in rho_acc update only. |
 | W_O lr      | Adam lr     | 1e-3    | Standard Adam learning rate for vocabulary projection.                                                       |
@@ -269,7 +274,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 | ρ formula    | \|\|B(A)\|\| / (\|\|B(A)\|\| + eps)        | ρ_base · χ[i] / (χ₀ + χ[i]), χ[i] = max\|A[e]\| at node i         |
 | R formula    | B(A(oi,oj)) − B(A(oj,oi))                  | B[e] + ρ[src(e)] · (Σ_{succ(e)} B − Σ_{pred(e)} B)                |
 | succ/pred    | succ_admitted filtered by rho_acc           | topology declared separately; succ(e) = {f : src(f)==tgt(e)} in DeclaredGraph |
-| ρ_base       | implicit (1.0 in code, undeclared)          | M-declared with reason (V9 §9)                                      |
+| ρ_base       | implicit (1.0 in code, undeclared)          | M-declared: doubles ρ ceiling for [0,1]^dim chi domain (V9 §9)     |
 | χ₀           | implicit (1.0 in code, undeclared)          | M-declared (V9 §9)                                                  |
 | rho_n (accum)| \|\|B(A)\|\| / (\|\|B\|\| + eps)           | ρ_base · χ_n / (χ₀ + χ_n) from A                                   |
 | W_O          | not declared                                | declared as only gradient-updated parameter                          |

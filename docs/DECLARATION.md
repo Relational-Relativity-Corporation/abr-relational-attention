@@ -1,4 +1,4 @@
-# ABR Relational Attention -- M Declaration V4.2
+# ABR Relational Attention -- M Declaration V4.3
 **Metatron Dynamics, Inc. -- 2026-11-12**
 **Kernel: V9 (kernel_reference.md 2026-10-24)**
 **Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared**
@@ -33,6 +33,88 @@ M : O -> D
 O = token positions in a declared input sequence.
 Each M(ok) is the phonemic-semantic state of the token at position k,
 represented as a finite-dimensional embedding vector (bounded by D).
+
+---
+
+## Language Region — Observable Variable Set (Pre-Topological Declaration)
+
+**What M can admissibly map into D at the language region, before any topology is declared.**
+
+### Human Reference Frame
+
+The language region is bounded by the human perceptual and cognitive frame — to what
+human perception and cognition can declare through M into D. Change and relation are
+invariant within that boundary. No claim is made beyond D.
+
+Language is the primary bounded domain of human symbolic communication. Its
+relational structure is admissible as an observable because it evolved as a compression
+of physical phonemic structure — acoustic production events that were physically real
+before the symbols existed. The symbolic compression preserves relational structure
+as a downstream projection of that physical origin.
+
+### Degrees of Freedom — Nested Confinement Hierarchy
+
+Origin declaration, 2026-11-12.
+
+The degrees of freedom in the language region are nested and confining, not additive.
+Each level removes degrees of freedom from the level below:
+
+    character count
+      --> word structure         (not all character sequences form words)
+        --> sentence structure   (not all word sequences form sentences)
+          --> semantic structure (not all sentence sequences carry coherent meaning)
+              over the course of: words --> phrases --> sentences --> paragraphs --> volumes
+
+Every locus declaration above the character level collapses interior relational structure
+from the level below. This is consistent with the kernel's declared locus boundary rule:
+at each scale transition, sub-locus relational structure is collapsed into the declared
+locus variable set for that level.
+
+### M at the Word/Token Level (SemanticM — PPMI)
+
+The declared M in this application operates at the word/token level.
+SemanticM::from_corpus constructs PPMI co-occurrence embeddings from the declared
+corpus text.
+
+**What M preserves:**
+- Directional co-occurrence relationships within the declared window
+- Token-identity distinction (each token type has a distinct embedding)
+- Statistical trace of sentence-level semantic proximity at window scale
+- Relative frequency information above min_count
+
+**What M discards:**
+- Character-level relational structure (morphological decomposition)
+- Word order within the co-occurrence window
+- Sentence boundary signals below window scale
+- Cross-sentence structure beyond the declared window
+- Tokens below min_count (collapsed to unk_id)
+
+The 50 declared dimensions (PPMI_DIM = 50) are a projection of the word-level degrees
+of freedom through PPMI dimensionality reduction — a downstream projection of
+semantic-level containment and sentence-level proximity.
+
+Embeddings are min-max normalized to [0, 1]^dim before operator application. This is
+part of M. The normalization discards absolute scale; it preserves relative token-type
+distinctions within the declared vocabulary.
+
+### Edge Provenance Declaration
+
+Every edge (ti, tj) in EdgeStore carries **Continuation** provenance: within-sequence
+causal continuation established by sequence position (token at position i precedes
+token at position j in the declared sequence). Open boundary — no wraparound.
+Direction is admissible: relational coherence progression (source precedes target).
+
+### Open Conditions at This Level
+
+**ι[v] at the language region: OPEN.**
+The inertial response of a declared token to an applied relational contrast is not yet
+declared through M at the language region. What resists change at the word, sentence,
+or semantic level has not been declared. Under the declared-information rule,
+ε[e] = |Δ(ι)[e]| · 𝟙[e] is not evaluated at language edges — not
+evaluated-and-equal-to-zero; not declared through M.
+
+**Connection / entanglement at the language region: OPEN.**
+[To be declared — next variable.]
 
 ---
 
@@ -358,6 +440,20 @@ ABR cannot generalise — only that it did not outperform Direct M under these s
 **Closed-world M declaration:** PPMI vocabulary built from train text only. Test tokens
 outside train vocab receive unk treatment. This is correct protocol (no test leakage into M).
 The OOV rate is a property of the small M corpus, not a protocol violation.
+
+---
+
+## V4.2 → V4.3 Change Record
+
+| Item | V4.2 | V4.3 |
+|------|-------|-------|
+| Language Region Observable Variable Set | Not declared | Added (Origin declaration, 2026-11-12): pre-topological declaration of what M can admissibly map into D at the language region. |
+| Human reference frame bounding | Implicit in Domain section | Explicitly stated: bounded by the human perceptual and cognitive frame; language admissible as observable via physical phonemic origin. |
+| Degrees of freedom | Not declared | Nested confinement hierarchy declared: character → word → sentence → semantic structure over words → phrases → sentences → paragraphs → volumes. Each level removes degrees of freedom from the level below. |
+| M preserves / discards | Not stated | Stated for SemanticM (PPMI): preserves directional co-occurrence, token-identity distinction, semantic proximity at window scale, relative frequency above min_count. Discards character-level structure, word order within window, sub-window sentence signals, cross-window structure, tokens below min_count. Normalization discards absolute scale. |
+| Edge provenance | Not declared | Declared: Continuation (within-sequence causal continuation; open boundary; no wraparound). |
+| ι[v] at language region | Not addressed | OPEN — declared not yet declared through M; ε[e] not evaluated (not equal to zero — not declared). |
+| Connection / entanglement | Not addressed | OPEN — declared as next variable to be declared. |
 
 ---
 

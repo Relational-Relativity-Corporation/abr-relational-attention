@@ -1,4 +1,4 @@
-# ABR Relational Attention -- M Declaration V4.3
+# ABR Relational Attention -- M Declaration V4.4
 **Metatron Dynamics, Inc. -- 2026-11-12**
 **Kernel: V9 (kernel_reference.md 2026-10-24)**
 **Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared**
@@ -113,8 +113,50 @@ or semantic level has not been declared. Under the declared-information rule,
 ε[e] = |Δ(ι)[e]| · 𝟙[e] is not evaluated at language edges — not
 evaluated-and-equal-to-zero; not declared through M.
 
-**Connection / entanglement at the language region: OPEN.**
-[To be declared — next variable.]
+**Connection / entanglement at the language region:**
+
+Origin declaration, 2026-11-12.
+
+Connection in the language region is nested and scope-bounded, parallel to the
+degrees of freedom hierarchy:
+
+    characters are connected within words
+      words are connected within sentences
+        sentences are connected within paragraphs
+          paragraphs are connected within volumes
+
+At each level, the connection scope is bounded by the containing unit at the level
+above. A character's connections are scoped to the word that contains it. A word's
+connections are scoped to the sentence that contains it. A sentence's connections
+are scoped to the paragraph that contains it. A paragraph's connections are scoped
+to the volume that contains it.
+
+This is dual to the degrees of freedom hierarchy: the DOF hierarchy states what
+relational structure is possible at each level; the connection hierarchy states
+the scope within which those relations are admitted at each level.
+
+**M at word/token level — connection scope declared:**
+
+SemanticM (PPMI, window=5) captures word-level connections within a local
+co-occurrence window. The window approximates sentence-proximity scope — words
+within five positions carry co-occurrence signal. This is a declared approximation
+of word-within-sentence connection scope.
+
+What the current M captures from the declared connection hierarchy:
+- Word-level connections within sentence-proximity scope (via window=5): **captured (approximation)**
+
+What the declared connection hierarchy admits but M does not yet declare:
+- Character-level connections within words: not encoded (M operates at word level)
+- Sentence-level connections within paragraphs: not encoded
+- Paragraph-level connections within volumes: not encoded
+
+The current EdgeStore (token-identity pairs, Continuation provenance) operates
+at the word/token level. The declared connection hierarchy states that higher-level
+scopes are admissible but not yet declared through M at this level.
+
+**OC-RA-8: Higher-level connection scopes — OPEN.**
+Sentence, paragraph, and volume connection structures are declared admissible
+per the connection hierarchy. Not yet declared through M.
 
 ---
 
@@ -361,6 +403,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-5: window-restricted O(n*k) accumulation (Phase 1)
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
 - OC-RA-7: saturating form χ/(χ₀+χ) -- **CLOSED** (Origin declaration, 2026-11-12)
+- OC-RA-8: higher-level connection scopes (sentence, paragraph, volume) -- OPEN (declared admissible, not yet declared through M; Origin declaration 2026-11-12)
 
 ---
 
@@ -440,6 +483,16 @@ ABR cannot generalise — only that it did not outperform Direct M under these s
 **Closed-world M declaration:** PPMI vocabulary built from train text only. Test tokens
 outside train vocab receive unk treatment. This is correct protocol (no test leakage into M).
 The OOV rate is a property of the small M corpus, not a protocol violation.
+
+---
+
+## V4.3 → V4.4 Change Record
+
+| Item | V4.3 | V4.4 |
+|------|-------|-------|
+| Connection / entanglement at language region | OPEN — placeholder | CLOSED declaration (Origin, 2026-11-12): nested scope-bounded connection hierarchy — characters within words, words within sentences, sentences within paragraphs, paragraphs within volumes. Dual to DOF hierarchy. |
+| M connection scope | Not stated | Stated: window=5 captures word-level connections at sentence-proximity scope (approximation). Character, sentence, paragraph, volume scopes not yet declared through M. |
+| OC-RA-8 | Not listed | OPEN: higher-level connection scopes (sentence, paragraph, volume) declared admissible, not yet declared through M. |
 
 ---
 

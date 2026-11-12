@@ -6,14 +6,28 @@
 // Everything else is accumulated (ρ_acc) or declared (M, A, B, R, η, θ, W).
 // W_O alone is trained by gradient descent on a task loss.
 //
+// SCOPE DECLARATION (exploratory; see DECLARATION.md §W_O):
+//
+//   This demo measures TRAINING FIT, not held-out generalization. Training
+//   and evaluation use the same 233-token Darwin paragraph. No generalization
+//   claim is made.
+//
+//   N_MATURE=3 passes over the same paragraph during R-field construction are
+//   a declared exploratory deviation from the streaming single-pass protocol.
+//   rho_acc levels reflect repeated exposure, not single-pass accumulation.
+//
 // WHAT THIS DEMO MEASURES:
 //   Language modeling task: predict next token P(t+1 | relational_context_t).
 //   Three representations for the same task, same W_O architecture:
 //
-//   BASELINE A — Random 50-dim vectors:
-//     Representations are drawn once (fixed seed) with no semantic structure.
-//     W_O can only learn the marginal token distribution (frequency bias).
-//     This is the floor: best achievable without useful representations.
+//   BASELINE A — Random 50-dim vectors (position-memorization baseline):
+//     Each token POSITION receives a distinct LCG-seeded vector regardless
+//     of token identity. W_O learns position → next-token mappings, which
+//     is sequence memorization, not useful representation. This baseline
+//     does NOT measure frequency-only or token-type prediction; it measures
+//     how easily W_O can memorize the fixed sequence by position index.
+//     Its apparent dominance at 500 epochs reflects memorization, not
+//     representation quality.
 //
 //   BASELINE B — GloVe-50d embeddings (no ABR):
 //     Representations are the GloVe vector of the CURRENT token at each position.
@@ -25,14 +39,8 @@
 //     Representations aggregate relational history via the streaming field.
 //     Tokens that appear in SIMILAR RELATIONAL CONTEXTS have similar R-fields.
 //     W_O can learn "in this relational context, the next token is likely..."
-//     This is the claim: ABR representations encode more useful structure
-//     for prediction than raw GloVe or random vectors.
-//
-// KEY ARCHITECTURAL CLAIM:
-//   The relational field accumulates structure that makes W_O's job easier:
-//   tokens appearing in similar relational contexts produce similar R-fields,
-//   so W_O learns a smoother decision boundary.
-//   The ABR R-field IS the attention output — W_O is the readout head only.
+//     ABR and GloVe both use token-type representations; their comparison is
+//     the meaningful one. Result is training fit under declared conditions.
 //
 // OPTIMIZER: Adam (adaptive learning rate, faster than SGD for small datasets).
 // CORPUS: Darwin paragraph (233 tokens, 135 unique in compact vocab).
@@ -287,17 +295,16 @@ fn main() {
     let abr_vs_glove_pplx_ratio = OutputProjection::perplexity(loss_g)
                                  / OutputProjection::perplexity(loss_a);
 
-    println!("  ABR R-field vs GloVe:");
+    println!("  ABR R-field vs GloVe (training fit, same corpus):");
     println!("    Loss reduction:       {:.1}%", abr_vs_glove_loss_pct);
     println!("    Perplexity ratio:     {:.2}× (GloVe pplx / ABR pplx)", abr_vs_glove_pplx_ratio);
     println!("    Top-1 accuracy gain:  {:.1}pp", 100.0 * (acc_a - acc_g));
     println!();
     println!("  Interpretation:");
     if loss_a < loss_g {
-        println!("    ABR < GloVe: relational context helps next-token prediction.");
-        println!("    The R-field encodes WHO co-occurs with this token relationally,");
-        println!("    not just WHAT this token means lexically (GloVe).");
-        println!("    W_O learns from co-occurrence structure, not dictionary meaning.");
+        println!("    ABR < GloVe: R-field achieves lower training loss than GloVe.");
+        println!("    Both use token-type representations; this comparison is valid.");
+        println!("    Result is training fit. Held-out generalization not established.");
     } else {
         println!("    GloVe ≤ ABR on this corpus.");
         println!("    Darwin paragraph is too short for the relational field to ");
@@ -305,7 +312,13 @@ fn main() {
         println!("    Expected: ABR advantage grows with corpus size.");
     }
     println!();
-    println!("  KEY FINDING: W_O is the ONLY gradient-updated parameter.");
+    println!("  Scope (declared exploratory conditions):");
+    println!("    - Training and evaluation use the SAME 233-token paragraph.");
+    println!("    - N_MATURE={} replay passes deviate from single-pass streaming.", N_MATURE);
+    println!("    - [A] random baseline is position-memorization, not a frequency floor.");
+    println!("    - Meaningful comparison: ABR vs GloVe (both token-type reps).");
+    println!();
+    println!("  KEY STRUCTURAL CLAIM: W_O is the ONLY gradient-updated parameter.");
     println!("  The relational field (ρ_acc in EdgeStore) is NOT updated by backprop.");
     println!("  ABR decouples representation accumulation from prediction learning.");
     println!();

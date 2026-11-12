@@ -158,6 +158,40 @@ The relational field (ρ_acc in EdgeStore) is not updated by backprop.
 ABR decouples representation accumulation (topology formation) from
 prediction learning (W_O gradient descent).
 
+### wo_demo Scope Declaration (exploratory; 2026-11-11)
+
+wo_demo (src/bin/wo_demo.rs) is an exploratory training-fit measurement.
+The following conditions are declared:
+
+**Training fit, not generalization.** wo_demo trains and evaluates on the
+same 233-token Darwin paragraph. Reported perplexity and accuracy are
+training-fit metrics. They do not establish held-out predictive improvement.
+No generalization claim is made from these results.
+
+**Replay-based accumulation (declared exploratory deviation).** wo_demo
+runs N_MATURE=3 passes over the same paragraph during R-field construction.
+The streaming declaration prohibits replay-based accumulation: rho_acc is
+intended to accumulate over distinct exposures, not repeated passes through
+the same sequence. The repeated passes inflate rho_acc beyond single-pass
+levels. This is a declared exploratory deviation. Results are valid as
+training-fit measurements under these declared conditions; they do not
+represent the streaming accumulation protocol.
+
+**Random baseline is a position-memorization baseline.** The random baseline
+([A] in wo_demo) assigns a distinct LCG-seeded 50-dim vector to each token
+*position*, not each token *type*. W_O therefore learns a position-to-next-token
+mapping over the fixed 233-position sequence — equivalent to memorizing the
+sequence by position index. It is not a frequency-only floor. The apparent
+dominance of the random baseline at 500 epochs reflects this memorization
+property. The meaningful comparison is ABR vs GloVe: both use token-type
+representations and neither enables position memorization.
+
+**ABR vs GloVe comparison (training fit).** ABR R-field achieves lower
+training loss than GloVe (pplx 10.7 vs 57.6, 5.37×) on the Darwin paragraph
+under the declared exploratory conditions. This measures the R-field's
+training-fit advantage over static token-type embeddings. It does not
+establish held-out generalization.
+
 ---
 
 ## Declared Observables

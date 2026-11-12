@@ -301,16 +301,24 @@ impl Default for StreamingField {
 // ── Internal helpers ───────────────────────────────────────────────────────────
 
 /// Compute ρₙ for a declared pair from operator A.
-/// ρₙ = ρ_base · χ/(1+χ),  χ = max|A[e]|
+/// ρₙ = ρ_base · χ/(χ₀+χ),  χ = max|A[e]|
+/// ρ_base = 1.0, χ₀ = 1 (language domain M declaration — see operators.rs RHO_BASE).
 fn operator_a_to_rho_n(pair: &RelationalPair, vocab: &VocabTable) -> f64 {
+    use crate::operators::RHO_BASE;
     let a = operator_a(&pair.source, &pair.target, vocab);
     let chi: f64 = a.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
-    // ρ_base = 1.0 (declared in declaration.rs)
-    chi / (1.0 + chi)
+    // χ₀ = 1 (V9 Origin general value; language domain declaration)
+    RHO_BASE * chi / (1.0 + chi)
 }
 
 /// Apply operator B to a local edge list.
 /// B[e] = A[e] + Σ_{f ∈ succ(e)} A[f]
+///
+/// Canonical V9 kernel definition:
+///   succ(e = (sp, tp)) = { f : src(f) == tp }
+///   i.e. edges whose SOURCE is the TARGET of e — forward continuations from tp.
+///   (kernel_reference.md §11; operators.rs `succ(e) = out[edges[e].1]`)
+///
 /// Returns flat Vec<f64> of shape [n_edges × dim].
 fn apply_operator_b(
     edges: &[(usize, usize)],
@@ -328,19 +336,22 @@ fn apply_operator_b(
         operator_a(&pair.source, &pair.target, vocab)
     }).collect();
 
-    // Build tgt_to_edges index
-    let mut tgt_to_edges: Vec<Vec<usize>> = vec![Vec::new(); local_ids.len()];
-    for (ei, &(_, tp)) in edges.iter().enumerate() {
-        tgt_to_edges[tp].push(ei);
+    // Build src_to_edges index: src_to_edges[n] = { e : src(e) == n }
+    // succ(e = (sp, tp)) = src_to_edges[tp] = edges whose source is tp.
+    let mut src_to_edges: Vec<Vec<usize>> = vec![Vec::new(); local_ids.len()];
+    for (ei, &(sp, _)) in edges.iter().enumerate() {
+        src_to_edges[sp].push(ei);
     }
 
-    // B[e] = A[e] + Σ_succ A[f] where succ(e) = edges targeting tp
+    // B[e] = A[e] + Σ_{f ∈ succ(e)} A[f]
+    // succ(e = (sp, tp)) = src_to_edges[tp] (edges starting from tp)
     let mut b_flat = vec![0.0_f64; n_edges * dim];
     for (ei, &(_, tp)) in edges.iter().enumerate() {
         for d in 0..dim {
             b_flat[ei * dim + d] = a_vecs[ei][d];
         }
-        for &fi in &tgt_to_edges[tp] {
+        // Add A[f] for each f in succ(e): edges whose source is tp
+        for &fi in &src_to_edges[tp] {
             for d in 0..dim {
                 b_flat[ei * dim + d] += a_vecs[fi][d];
             }
@@ -350,7 +361,13 @@ fn apply_operator_b(
 }
 
 /// Apply operator R to B-field.
-/// R[e] = B[e] + ρ[src(e)] · (Σ_succ B − Σ_pred B)
+/// R[e] = B[e] + ρ[src(e)] · (Σ_{f ∈ succ(e)} B[f] − Σ_{f ∈ pred(e)} B[f])
+///
+/// Canonical V9 kernel definitions:
+///   succ(e = (sp, tp)) = { f : src(f) == tp }  — edges starting from tp
+///   pred(e = (sp, tp)) = { f : tgt(f) == sp }  — edges ending at sp
+///   (kernel_reference.md §11; operators.rs lines 489-490, 563, 567)
+///
 /// Returns flat Vec<f64> of shape [n_edges × dim].
 fn apply_operator_r(
     b_flat: &[f64],
@@ -359,22 +376,24 @@ fn apply_operator_r(
     vocab: &VocabTable,
     dim: usize,
 ) -> Vec<f64> {
+    use crate::operators::RHO_BASE;
     let n_nodes = local_ids.len();
 
-    // Build tgt_to_edges and src_to_edges indices
-    let mut tgt_to_edges: Vec<Vec<usize>> = vec![Vec::new(); n_nodes];
+    // Build adjacency indices:
+    //   src_to_edges[n] = { e : src(e) == n }  → succ(e=(sp,tp)) = src_to_edges[tp]
+    //   tgt_to_edges[n] = { e : tgt(e) == n }  → pred(e=(sp,tp)) = tgt_to_edges[sp]
     let mut src_to_edges: Vec<Vec<usize>> = vec![Vec::new(); n_nodes];
+    let mut tgt_to_edges: Vec<Vec<usize>> = vec![Vec::new(); n_nodes];
     for (ei, &(sp, tp)) in edges.iter().enumerate() {
-        tgt_to_edges[tp].push(ei);
         src_to_edges[sp].push(ei);
+        tgt_to_edges[tp].push(ei);
     }
 
-    // ρ per node: ρ[i] = max|A| over incident edges / (1 + max|A|)
+    // ρ per node: ρ[i] = RHO_BASE · χ[i] / (χ₀ + χ[i]),  χ₀ = 1
+    // χ[i] = max |A[e]| over all edges incident on node i (source or target).
     //
     // PERFORMANCE FIX: iterate edges once — O(n_edges × dim) — not O(n_nodes × n_edges × dim).
     // For each edge (sp, tp), compute |A| once and update both endpoint nodes.
-    // The original O(n_nodes × n_edges) loop is equivalent: for each node i,
-    // find all incident edges. This scan finds the same set without the quadratic scan.
     let mut rho_node = vec![0.0_f64; n_nodes];
     for &(sp, tp) in edges {
         let pair = RelationalPair::declare(
@@ -383,26 +402,31 @@ fn apply_operator_r(
         ).unwrap();
         let a = operator_a(&pair.source, &pair.target, vocab);
         let chi: f64 = a.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
-        let rho = chi / (1.0 + chi);
+        // χ₀ = 1 (language domain M declaration)
+        let rho = RHO_BASE * chi / (1.0 + chi);
         // ρ[node] = max over all incident edges (source or target)
         if rho > rho_node[sp] { rho_node[sp] = rho; }
         if rho > rho_node[tp] { rho_node[tp] = rho; }
     }
 
-    // R[e] = B[e] + ρ[src(e)] * (Σ_succ B[f] - Σ_pred B[f])
+    // R[e = (sp, tp)] = B[e] + ρ[sp] · (Σ_{f ∈ succ(e)} B[f] − Σ_{f ∈ pred(e)} B[f])
+    // succ(e) = src_to_edges[tp]  (edges continuing forward from tp)
+    // pred(e) = tgt_to_edges[sp]  (edges arriving at sp)
     let mut r_flat = b_flat.to_vec();
     for (ei, &(sp, tp)) in edges.iter().enumerate() {
-        let mut s = vec![0.0_f64; dim];
-        let mut p = vec![0.0_f64; dim];
-        for &fi in &tgt_to_edges[tp] {
-            for d in 0..dim { s[d] += b_flat[fi * dim + d]; }
+        let mut fwd = vec![0.0_f64; dim];
+        let mut bwd = vec![0.0_f64; dim];
+        // fwd: succ(e) = edges whose source is tp
+        for &fi in &src_to_edges[tp] {
+            for d in 0..dim { fwd[d] += b_flat[fi * dim + d]; }
         }
-        for &fi in &src_to_edges[sp] {
-            for d in 0..dim { p[d] += b_flat[fi * dim + d]; }
+        // bwd: pred(e) = edges whose target is sp
+        for &fi in &tgt_to_edges[sp] {
+            for d in 0..dim { bwd[d] += b_flat[fi * dim + d]; }
         }
         let rho = rho_node[sp];
         for d in 0..dim {
-            r_flat[ei * dim + d] += rho * (s[d] - p[d]);
+            r_flat[ei * dim + d] += rho * (fwd[d] - bwd[d]);
         }
     }
     r_flat

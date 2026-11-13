@@ -1,4 +1,4 @@
-# ABR Relational Attention -- M Declaration V4.5
+# ABR Relational Attention -- M Declaration V4.6
 **Metatron Dynamics, Inc. -- 2026-11-12**
 **Kernel: V9 (kernel_reference.md 2026-10-24)**
 **Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared**
@@ -144,11 +144,35 @@ relational influence beyond its declared connection boundary.
 the magnitude of the emphasis differential across it. An edge connecting a
 high-emphasis locus to a low-emphasis locus carries elevated edge energy.
 
-ε[e] declaration through M: OPEN (OC-RA-9).
-SemanticM (PPMI) treats all tokens equally by co-occurrence frequency. Emphasis
-markers (!, ALL CAPS, italics, emotional vocabulary) are not encoded in PPMI
-co-occurrence statistics. ι[v] from emphasis is declared admissible through M but
-not yet implemented at this application level.
+**ε[e] declaration through M: IMPLEMENTED (OC-RA-9 CLOSED, 2026-11-12).**
+
+`extract_emphasis_tokens(text)` runs before case-folding and punctuation
+stripping to extract emphasis signals from raw corpus text:
+
+| Signal                               | Multiplier |
+|--------------------------------------|------------|
+| Normal word, declarative sentence    | 1.0        |
+| Sentence contains `?`                | × 1.2      |
+| Sentence contains `!`                | × 1.5      |
+| Word is ALL CAPS (alpha length > 1)  | × 2.0      |
+
+Multipliers combine multiplicatively (e.g., FIRE! → 2.0 × 1.5 = 3.0).
+
+`iota[token_id]` in SemanticM holds the per-token-type emphasis weight.
+Max-selection rule: iota[t] = max emphasis weight over all corpus occurrences
+(consistent with χ[i] max-selection in ρ — peak emphasis establishes the
+relational ceiling for that token type).
+
+`emphasis(token_id) -> f32` returns ι[v] for a token.
+`epsilon_edge(src_id, tgt_id) -> f32` returns |ι[src] − ι[tgt]| (ε[e]).
+
+`from_raw` and `from_glove_file` default all iota to 1.0 (ambient; no raw
+text source available for the emphasis pass). `from_corpus` runs the full
+emphasis pass and populates iota from the declared corpus text.
+
+Italics, bold, and emotional vocabulary lexicon remain undeclared through M
+at this application level — typographic signals only. These are OC-RA-9
+continuation scope.
 
 **Connection / entanglement at the language region:**
 
@@ -441,7 +465,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
 - OC-RA-7: saturating form χ/(χ₀+χ) -- **CLOSED** (Origin declaration, 2026-11-12)
 - OC-RA-8: higher-level connection scopes (sentence, paragraph, volume) -- OPEN (declared admissible, not yet declared through M; Origin declaration 2026-11-12)
-- OC-RA-9: ι[v] / ε[e] through emphasis markers -- OPEN (declared admissible; SemanticM does not encode emphasis; Origin declaration 2026-11-12)
+- OC-RA-9: ι[v] / ε[e] through emphasis markers -- **CLOSED** (implemented 2026-11-12; typographic signals only; italics/bold/emotional lexicon remain continuation scope)
 
 ---
 
@@ -521,6 +545,19 @@ ABR cannot generalise — only that it did not outperform Direct M under these s
 **Closed-world M declaration:** PPMI vocabulary built from train text only. Test tokens
 outside train vocab receive unk treatment. This is correct protocol (no test leakage into M).
 The OOV rate is a property of the small M corpus, not a protocol violation.
+
+---
+
+## V4.5 → V4.6 Change Record
+
+| Item | V4.5 | V4.6 |
+|------|-------|-------|
+| OC-RA-9 | OPEN — ι[v]/ε[e] declared admissible, not yet in M | **CLOSED** — implemented in SemanticM (src/semantic.rs). |
+| ε[e] through M | Evaluable in principle; not yet implemented | Implemented: `iota[token_id]` per-token-type emphasis weight; `emphasis(id)` and `epsilon_edge(src, tgt)` exposed on SemanticM. |
+| extract_emphasis_tokens | Not present | Added: pre-tokenization emphasis pass; ALL CAPS × 2.0, sentence `!` × 1.5, sentence `?` × 1.2; combined multiplicatively. |
+| iota max-selection | Not declared | Declared and implemented: per-type iota = max over corpus occurrences (consistent with χ[i] max-selection rule). |
+| from_raw / from_glove_file | — | iota defaults to 1.0 (ambient; no text source). from_corpus runs full emphasis pass. |
+| Remaining scope | — | Italics, bold, emotional vocabulary lexicon remain OC-RA-9 continuation scope (typographic signals only implemented). |
 
 ---
 

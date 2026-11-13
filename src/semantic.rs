@@ -48,6 +48,22 @@ use crate::declaration::{VocabTable, DOMAIN_LOWER, DOMAIN_UPPER};
 ///
 /// This is the declared M for ABR when using real language semantics.
 /// All embeddings are in [0,1]^dim after min-max normalization.
+///
+/// ## ι[v] — Emphasis (OC-RA-9, V4.5 declaration)
+///
+/// `iota[token_id]` is the per-token-type emphasis weight — the M-observable
+/// analog of ι[v] at the language region.  It is derived from the raw corpus
+/// text before tokenisation strips emphasis signals.
+///
+/// Weight scale:
+///   1.0 — ambient (normal declarative context)
+///   1.2 — sentence-level question emphasis (?)
+///   1.5 — sentence-level exclamatory emphasis (!)
+///   2.0 — word-level ALL CAPS
+/// Combined multiplicatively; per-type value is the MAX over all corpus
+/// occurrences (consistent with the max-selection rule for χ[i] in ρ).
+///
+/// `epsilon_edge(src, tgt)` returns |ι[src] − ι[tgt]| — the edge energy ε[e].
 #[derive(Debug, Clone)]
 pub struct SemanticM {
     /// Embedding matrix: vocab_size × dim, all values in [0,1].
@@ -60,6 +76,11 @@ pub struct SemanticM {
     pub dim: usize,
     /// Special token: unknown word (all 0.5 — center of domain).
     pub unk_id: usize,
+    /// Per-token-type emphasis weight ι[v].
+    /// iota[unk_id] = 1.0 (ambient).
+    /// Set to vec![1.0; vocab_size] when no emphasis pass is available
+    /// (e.g., from_raw, from_glove_file).
+    pub iota: Vec<f32>,
 }
 
 impl SemanticM {
@@ -113,12 +134,16 @@ impl SemanticM {
             .map(|(i, w)| (w.clone(), i))
             .collect();
 
+        // Default iota: 1.0 for all tokens (ambient; no emphasis pass for raw embeddings).
+        let iota = vec![1.0_f32; unk_id + 1];
+
         Self {
             embeddings: all_embeddings,
             vocab,
             id_to_word: all_words,
             dim,
             unk_id,
+            iota,
         }
     }
 
@@ -217,7 +242,22 @@ impl SemanticM {
             })
             .collect();
 
-        Self::from_raw(raw, words)
+        let mut m = Self::from_raw(raw, words);
+
+        // Emphasis pass: compute per-token-type ι[v] from raw text.
+        // from_raw defaults all iota to 1.0; we now replace with corpus-derived weights.
+        // Max-selection rule: iota[token_id] = max emphasis weight over all corpus occurrences.
+        let emphasis_tokens = extract_emphasis_tokens(text);
+        for (word, weight) in &emphasis_tokens {
+            if let Some(&tid) = m.vocab.get(word.as_str()) {
+                if tid < m.iota.len() && *weight > m.iota[tid] {
+                    m.iota[tid] = *weight;
+                }
+            }
+        }
+        // unk retains 1.0 (ambient).
+
+        m
     }
 
     /// Vocabulary size (including <unk>).
@@ -231,6 +271,22 @@ impl SemanticM {
     /// Tokenize text and return token_ids.
     pub fn encode(&self, text: &str) -> Vec<usize> {
         tokenize_text(text).iter().map(|w| self.token_id(w)).collect()
+    }
+
+    /// Return the emphasis weight ι[v] for a token.
+    ///
+    /// 1.0 = ambient. Higher = more emphasis declared through M.
+    /// Returns 1.0 for out-of-range ids (safe default).
+    pub fn emphasis(&self, token_id: usize) -> f32 {
+        self.iota.get(token_id).copied().unwrap_or(1.0)
+    }
+
+    /// Edge energy ε[e] = |ι[src] − ι[tgt]|.
+    ///
+    /// Declared: energy of an edge is the magnitude of the emphasis
+    /// differential across it (V4.5 declaration, OC-RA-9).
+    pub fn epsilon_edge(&self, src_id: usize, tgt_id: usize) -> f32 {
+        (self.emphasis(src_id) - self.emphasis(tgt_id)).abs()
     }
 
     /// Return a reference to the VocabTable for use with ABR attention layers.
@@ -327,13 +383,99 @@ impl SemanticM {
         }
 
         Ok(Self::from_raw(raw, words))
+        // iota defaults to 1.0 for all tokens (from_raw does not have a text source
+        // for the emphasis pass; GloVe-loaded M has ambient emphasis throughout).
     }
+}
+
+/// Extract `(lowercased_token, emphasis_weight)` pairs from raw text.
+///
+/// Runs BEFORE case-folding and punctuation stripping so that emphasis
+/// signals (ALL CAPS, !, ?) are still visible.
+///
+/// ## Weight scale
+///
+/// | Signal                        | Multiplier |
+/// |-------------------------------|------------|
+/// | Normal word, declarative      | 1.0        |
+/// | Sentence contains `?`         | × 1.2      |
+/// | Sentence contains `!`         | × 1.5      |
+/// | Word is ALL CAPS (len > 1)    | × 2.0      |
+///
+/// Sentence multipliers and word multipliers combine multiplicatively.
+/// Per-type iota in SemanticM uses the MAX over all corpus occurrences
+/// (max-selection rule, consistent with χ[i] in ρ).
+///
+/// A "sentence" is delimited by `.`, `!`, `?`, `\n`, or end of text.
+/// Single-character all-caps tokens (e.g., the pronoun "I") are NOT
+/// treated as ALL CAPS — they carry no additional emphasis.
+pub fn extract_emphasis_tokens(text: &str) -> Vec<(String, f32)> {
+    let mut result = Vec::new();
+
+    // Split into rough sentence chunks, keeping the delimiter character.
+    // We split on sentence-ending punctuation and newlines.
+    let mut chunk_start = 0usize;
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+
+    let mut i = 0usize;
+    while i <= n {
+        let end_of_chunk = i == n
+            || chars[i] == '.'
+            || chars[i] == '!'
+            || chars[i] == '?'
+            || chars[i] == '\n';
+
+        if end_of_chunk {
+            // Collect this chunk's character range
+            let chunk_end = if i < n { i + 1 } else { n };
+            let chunk: String = chars[chunk_start..chunk_end].iter().collect();
+
+            // Sentence-level emphasis: does the chunk contain ! or ??
+            let sent_exclaim = chunk.contains('!');
+            let sent_question = chunk.contains('?');
+            let sent_mult = if sent_exclaim { 1.5_f32 }
+                            else if sent_question { 1.2_f32 }
+                            else { 1.0_f32 };
+
+            // Extract words from this chunk
+            for raw_word in chunk.split(|c: char| {
+                c.is_whitespace() || (c.is_ascii_punctuation() && c != '\'')
+            }) {
+                if raw_word.is_empty() { continue; }
+                if !raw_word.chars().any(|c| c.is_alphabetic()) { continue; }
+
+                // ALL CAPS: more than one character, all alphabetic chars are uppercase
+                let alpha_chars: Vec<char> = raw_word.chars()
+                    .filter(|c| c.is_alphabetic())
+                    .collect();
+                let is_all_caps = alpha_chars.len() > 1
+                    && alpha_chars.iter().all(|c| c.is_uppercase());
+                let word_mult = if is_all_caps { 2.0_f32 } else { 1.0_f32 };
+
+                let weight = sent_mult * word_mult;
+                let lowercased = raw_word.to_lowercase();
+                // Filter out tokens with no alphabetic content after lowercasing
+                if lowercased.chars().any(|c| c.is_alphabetic()) {
+                    result.push((lowercased, weight));
+                }
+            }
+
+            chunk_start = chunk_end;
+        }
+        i += 1;
+    }
+
+    result
 }
 
 /// Tokenize text into lowercase word tokens.
 ///
 /// Splits on whitespace and punctuation; lowercases all words.
 /// Returns Vec<String> — each element is one token.
+///
+/// NOTE: This function strips all emphasis signals. Use
+/// `extract_emphasis_tokens` when emphasis (ι[v]) is needed.
 pub fn tokenize_text(text: &str) -> Vec<String> {
     text.split(|c: char| c.is_whitespace() || (!c.is_alphabetic() && c != '\''))
         .map(|w| w.to_lowercase())
@@ -436,6 +578,120 @@ mod tests {
     fn test_tokenize_empty() {
         let tokens = tokenize_text("");
         assert!(tokens.is_empty());
+    }
+
+    // ── Emphasis tests (OC-RA-9) ──────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_emphasis_ambient() {
+        // Normal declarative sentence — all weights should be 1.0
+        let pairs = extract_emphasis_tokens("the cat sat on the mat.");
+        for (_, w) in &pairs {
+            assert!((*w - 1.0).abs() < 1e-6, "ambient weight must be 1.0, got {}", w);
+        }
+    }
+
+    #[test]
+    fn test_extract_emphasis_exclamation() {
+        // Sentence-level emphasis: words in an exclamatory sentence get 1.5
+        let pairs = extract_emphasis_tokens("Run away!");
+        for (_, w) in &pairs {
+            assert!((*w - 1.5).abs() < 1e-6,
+                "exclamatory sentence weight must be 1.5, got {}", w);
+        }
+    }
+
+    #[test]
+    fn test_extract_emphasis_question() {
+        let pairs = extract_emphasis_tokens("What is this?");
+        for (_, w) in &pairs {
+            assert!((*w - 1.2).abs() < 1e-6,
+                "question sentence weight must be 1.2, got {}", w);
+        }
+    }
+
+    #[test]
+    fn test_extract_emphasis_all_caps_declarative() {
+        // ALL CAPS word in a declarative sentence: 2.0
+        let pairs = extract_emphasis_tokens("This is URGENT.");
+        let urgent = pairs.iter().find(|(w, _)| w == "urgent");
+        assert!(urgent.is_some(), "URGENT must be tokenized as 'urgent'");
+        let (_, w) = urgent.unwrap();
+        assert!((*w - 2.0).abs() < 1e-6,
+            "ALL CAPS declarative weight must be 2.0, got {}", w);
+        // non-caps words should be 1.0
+        let this = pairs.iter().find(|(w, _)| w == "this").unwrap();
+        assert!((this.1 - 1.0).abs() < 1e-6,
+            "ambient word in declarative must be 1.0, got {}", this.1);
+    }
+
+    #[test]
+    fn test_extract_emphasis_all_caps_exclamatory() {
+        // ALL CAPS in exclamatory sentence: 2.0 × 1.5 = 3.0
+        let pairs = extract_emphasis_tokens("FIRE!");
+        let fire = pairs.iter().find(|(w, _)| w == "fire").unwrap();
+        assert!((fire.1 - 3.0).abs() < 1e-6,
+            "ALL CAPS exclamatory must be 3.0, got {}", fire.1);
+    }
+
+    #[test]
+    fn test_all_caps_single_char_not_amplified() {
+        // Single-character ALL CAPS (e.g., "I") must not be treated as emphasis
+        let pairs = extract_emphasis_tokens("I went there.");
+        let i_tok = pairs.iter().find(|(w, _)| w == "i");
+        if let Some((_, w)) = i_tok {
+            assert!((*w - 1.0).abs() < 1e-6,
+                "single-char 'I' must not get ALL CAPS emphasis, got {}", w);
+        }
+    }
+
+    #[test]
+    fn test_iota_populated_in_from_corpus() {
+        // "FIRE" appears in an exclamatory sentence → iota for "fire" > 1.0
+        let corpus = "The fire was bright. FIRE! The fire is gone.";
+        let m = SemanticM::from_corpus(corpus, 8, 2, 1);
+        let fire_id = m.token_id("fire");
+        if fire_id != m.unk_id {
+            assert!(m.emphasis(fire_id) > 1.0,
+                "iota['fire'] must be > 1.0 when FIRE! appears in corpus, got {}",
+                m.emphasis(fire_id));
+        }
+    }
+
+    #[test]
+    fn test_iota_max_selection() {
+        // "fire" appears normally AND as FIRE! — iota must be the MAX (3.0)
+        let corpus = "the fire burned. FIRE! the fire went out.";
+        let m = SemanticM::from_corpus(corpus, 8, 1, 1);
+        let fire_id = m.token_id("fire");
+        if fire_id != m.unk_id {
+            assert!((m.emphasis(fire_id) - 3.0).abs() < 1e-5,
+                "iota['fire'] must be max = 3.0, got {}", m.emphasis(fire_id));
+        }
+    }
+
+    #[test]
+    fn test_epsilon_edge() {
+        let corpus = "the fire burned. FIRE! normal words here.";
+        let m = SemanticM::from_corpus(corpus, 8, 1, 1);
+        let fire_id = m.token_id("fire");
+        let the_id  = m.token_id("the");
+        if fire_id != m.unk_id && the_id != m.unk_id {
+            let eps = m.epsilon_edge(fire_id, the_id);
+            // ι[fire]=3.0, ι[the]=1.0 → ε = 2.0
+            assert!(eps > 0.0,
+                "epsilon_edge between high- and low-emphasis tokens must be > 0");
+            assert!((eps - (m.emphasis(fire_id) - m.emphasis(the_id)).abs()).abs() < 1e-6,
+                "epsilon_edge must equal |ι[src] - ι[tgt]|");
+        }
+    }
+
+    #[test]
+    fn test_unk_has_ambient_iota() {
+        let corpus = "hello world";
+        let m = SemanticM::from_corpus(corpus, 4, 1, 1);
+        assert!((m.emphasis(m.unk_id) - 1.0).abs() < 1e-6,
+            "unk token iota must be 1.0 (ambient)");
     }
 
     #[test]

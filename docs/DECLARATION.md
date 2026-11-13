@@ -1,5 +1,5 @@
-# ABR Relational Attention -- M Declaration V4.6
-**Metatron Dynamics, Inc. -- 2026-11-12**
+# ABR Relational Attention -- M Declaration V5.0
+**Metatron Dynamics, Inc. -- 2026-11-13**
 **Kernel: V9 (kernel_reference.md 2026-10-24)**
 **Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared**
 
@@ -23,6 +23,49 @@ physical relationships were physically real before the symbols existed.
 Tokens are the declared loci of the language relational field. The
 observable at each locus is the phonemic-semantic state of that token.
 M declares the embedding vector as the measurement of that state in D.
+
+---
+
+## Text as a Complete Relational System
+
+Origin declaration, 2026-11-13.
+
+Text is not a sequence of symbols to which relational structure is applied — text is
+a complete relational system in which the four relational primitives are present in
+the observable and do not need to be imposed from outside.
+
+**Relation as primitive.** Tokens are not independent objects that happen to be
+related. Their identity is constituted by their relational position in the vocabulary.
+The distributional hypothesis underlying PPMI reflects this: M is a measurement of
+relational capacity, not of token identity in isolation. The loci are real; the
+relations between them are what make the loci what they are.
+
+**Degrees of freedom.** The DOF hierarchy (declared V4.3) is not a modeling choice —
+it is the structure of what text admits. Not all character sequences form words. Not
+all word sequences form sentences. Not all sentence sequences carry coherent meaning.
+Each level confines the level below. This is the observable structure of the language
+region, not an interpretation imposed upon it.
+
+**Energy.** ε[e] = |ι[src] − ι[tgt]| is the emphasis differential across an edge —
+the relational tension between loci of different emphasis weight. Energy is what drives
+relational evolution. High-energy edges connect loci of maximally different emphasis
+weight; they are the active relations. Low-energy edges are ambient. Tunneling is an
+energy phenomenon: a locus whose ε exceeds the connection scope threshold propagates
+relational influence beyond its declared boundary. Because energy is a primitive of
+the relational system — not an add-on — ε[e] weighting of ρ_acc accumulation is
+structurally required, not optional.
+
+**Connection.** The connection hierarchy (declared V4.4) is the scope within which
+relations are admitted at each level. This is not a design parameter — it is the
+observable scope structure of text. Characters are connected within words because word
+structure is what admits character relations. Words are connected within sentences
+because sentence structure is what admits word relations.
+
+**Consequence for M.** Because the four primitives are present in the observable, the
+operators (A, B, R, ρ) are descriptions of what the relational system already does —
+not algorithms imposed on text. The framework is in principle verifiable from the
+observable alone. M at each scale must faithfully encode what that scale contains
+and must not cross the scope boundary of its declared level.
 
 ---
 
@@ -85,7 +128,8 @@ corpus text.
 **What M discards:**
 - Character-level relational structure (morphological decomposition)
 - Word order within the co-occurrence window
-- Sentence boundary signals below window scale
+- Sentence boundaries within the window (window=5 crosses sentence boundaries
+  without restriction — declared gap; see OC-RA-10)
 - Cross-sentence structure beyond the declared window
 - Tokens below min_count (collapsed to unk_id)
 
@@ -199,12 +243,13 @@ the scope within which those relations are admitted at each level.
 **M at word/token level — connection scope declared:**
 
 SemanticM (PPMI, window=5) captures word-level connections within a local
-co-occurrence window. The window approximates sentence-proximity scope — words
-within five positions carry co-occurrence signal. This is a declared approximation
-of word-within-sentence connection scope.
+co-occurrence window. Per the window=scope boundary principle (see Multi-Scale M
+Structure below), word-level M should admit only within-sentence co-occurrences.
+The current implementation uses a fixed window=5 that ignores sentence boundaries —
+a declared gap (OC-RA-10).
 
 What the current M captures from the declared connection hierarchy:
-- Word-level connections within sentence-proximity scope (via window=5): **captured (approximation)**
+- Word-level connections within sentence-proximity scope (via window=5): **captured (crosses sentence boundaries — OC-RA-10)**
 
 What the declared connection hierarchy admits but M does not yet declare:
 - Character-level connections within words: not encoded (M operates at word level)
@@ -223,16 +268,107 @@ per the connection hierarchy. Not yet declared through M.
 
 ## Relational Evolution Direction
 
-The admissible direction is relational coherence progression -- an
-intrinsic physical property of language in which each token oj is
-relationally dependent on its predecessors for coherence.
+Origin declaration, 2026-11-13 (supersedes prior partial declaration; OC-RA-4 CLOSED).
 
-Sequence position is M's declared measurement of relational coherence
-progression. It is not a numerical primitive -- it is the observable
-trace of the physical relational dependency structure.
+Relational evolution is the process by which relational structure develops as a system
+is traversed. In text, relational evolution is linearized exactly as left-to-right
+reading order. This is not a convention — it is the structure of the observable. Text
+is relational evolution written down. The human reference frame for the language region
+is the reading frame, and that frame has an absolute direction.
 
-Reverse direction (j -> i, j > i) is inadmissible: oi does not depend
-on oj for coherence.
+**Direction declaration:** For every edge e = (src, tgt) in the language region:
+- src = the locus earlier in relational evolution (token already encountered)
+- tgt = the locus later in relational evolution (token whose relational context is
+  being established by what precedes it)
+- Direction: src → tgt, always, at every scale
+
+**Scale-invariance.** Relational evolution direction is invariant across all scales
+of the connection hierarchy:
+
+    Character scale: left → right within word
+    Word scale:      left → right within sentence
+    Sentence scale:  left → right within paragraph
+    Paragraph scale: left → right within volume
+
+The connection scope changes at each level. The direction does not.
+
+**PPMI symmetry does not introduce edge symmetry.** PPMI(i,j) ≈ PPMI(j,i) is a
+property of M — the measurement of relational capacity of token types in the corpus.
+Edge direction is determined separately by position in the text. M encodes what a
+token type is in the relational structure of the vocabulary. Edge direction is supplied
+by the observable (reading order). These are separately declared. A[e = (u→v)] and
+A[e' = (v→u)] are different quantities with opposite signs. The first is admissible;
+the second is not.
+
+**Bidirectionality is inadmissible.** A reverse edge (tgt → src) would assert that
+relational evolution runs backward — that a later token establishes the relational
+context of an earlier one. The observable does not provide this. The human reference
+frame does not contain it. For every co-occurrence pair (u at position i, v at
+position j) where i < j: exactly one edge exists, directed u → v. No reverse edge
+exists at any scale.
+
+**OC-RA-4: CLOSED** (Origin declaration, 2026-11-13). Edge direction = relational
+evolution direction. Bidirectionality is inadmissible. Direction is invariant at
+all scales. PPMI symmetry in M is a property of the measurement, not of edge direction.
+
+Sequence position is M's declared measurement of relational coherence progression.
+It is not a numerical primitive — it is the observable trace of the relational
+dependency structure of text.
+
+---
+
+## Multi-Scale M Structure
+
+Origin declaration, 2026-11-13.
+
+One M per scale of the connection hierarchy. Each M encodes only the relational
+structure admitted at its scale. Cross-scope co-occurrences belong to the M one
+level up — not to the M at the lower scale.
+
+### Window = Scope Boundary Principle
+
+The co-occurrence window at each scale is bounded by the connection scope declared
+for that scale. The window is not a free parameter — it is the declared connection
+scope of that level. A window size parameter N means: look at up to N neighbors
+within the declared connection scope. The scope boundary overrides the count. If
+a sentence has only 3 words before position i, the word-level window extends back
+only 3 — not into the previous sentence.
+
+| Scale | Loci | Window boundary | Admits |
+|---|---|---|---|
+| M_char | characters | word boundary | character co-occurrences within words only |
+| M_word | tokens | sentence boundary | token co-occurrences within sentences only |
+| M_sent | sentences | paragraph boundary | sentence co-occurrences within paragraphs only |
+| M_para | paragraphs | volume boundary | paragraph co-occurrences within volumes only |
+
+**Cross-scope connections at a given scale are tunneling events only.** The only
+admissible cross-boundary connection at scale k is a tunneling event: a locus whose
+ε[e] exceeds the ambient energy of its scope propagates relational influence to the
+scope above. This mechanism is separate from M — it is not encoded in M at scale k.
+Word-level M does not encode cross-sentence connections even when a high-emphasis
+token (FIRE!) is present; that cross-sentence propagation is handled by ε[e]
+exceeding the sentence-scope energy threshold.
+
+### Current State of Multi-Scale M
+
+**M_word (SemanticM — implemented):** Word-level PPMI. Currently uses a fixed
+window=5 that ignores sentence boundaries. This violates the window=scope principle.
+Declared gap: OC-RA-10. Fix requires sentence boundary detection in the corpus
+processing pass, upstream of PPMI co-occurrence counting.
+
+**M_char (not yet built):** Character-level relational structure within words.
+Loci: characters. Window: word boundary. What M_char would encode: morphological
+and orthographic relational structure — which character sequences co-occur within
+words. Natural upstream source: abr-u-tokenizer (character participation patterns
+already computed there). Declared gap: OC-RA-11.
+
+**M_sent (not yet built):** Sentence-level relational structure within paragraphs.
+Loci: sentences (or sentence embeddings derived from M_word). Window: paragraph
+boundary. What M_sent would encode: discourse-level relational structure — which
+kinds of sentences follow each other within paragraphs. Declared gap: OC-RA-8.
+
+**M_para (not yet built):** Paragraph-level relational structure within volumes.
+Loci: paragraphs. Window: volume boundary. Declared gap: OC-RA-8.
 
 ---
 
@@ -460,12 +596,15 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-1: theta_min calibration (Phase 1)
 - OC-RA-2: eta calibration (Phase 1)
 - OC-RA-3: generalisation -- held-out validation (Phase 1) -- **CLOSED** (OC-RA-3 benchmark, 2026-11-12; see below)
-- OC-RA-4: bidirectional direction -- not declared
+- OC-RA-4: bidirectional direction -- **CLOSED** (Origin declaration, 2026-11-13; bidirectionality inadmissible; edge direction = relational evolution direction; src=earlier, tgt=later; invariant at all scales)
 - OC-RA-5: window-restricted O(n*k) accumulation (Phase 1)
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
 - OC-RA-7: saturating form χ/(χ₀+χ) -- **CLOSED** (Origin declaration, 2026-11-12)
-- OC-RA-8: higher-level connection scopes (sentence, paragraph, volume) -- OPEN (declared admissible, not yet declared through M; Origin declaration 2026-11-12)
+- OC-RA-8: higher-level connection scopes (sentence, paragraph, volume) -- OPEN (M_sent, M_para not yet built; window=scope principle declared; Origin declaration 2026-11-12/2026-11-13)
 - OC-RA-9: ι[v] / ε[e] through emphasis markers -- **CLOSED** (implemented 2026-11-12; typographic signals only; italics/bold/emotional lexicon remain continuation scope)
+- OC-RA-10: M_word crosses sentence boundaries -- OPEN (window=5 ignores sentence boundaries; fix requires sentence boundary detection upstream of PPMI co-occurrence counting; declared gap 2026-11-13)
+- OC-RA-11: M_char not yet built -- OPEN (character-level relational structure within words undeclared through M; natural upstream source abr-u-tokenizer; declared gap 2026-11-13)
+- OC-RA-12: ε[e] not integrated into operator path -- OPEN (energy is a primitive of the relational system; ε[e] weighting of ρ_acc accumulation is structurally required; ι stored on SemanticM but operators do not use it; declared gap 2026-11-13)
 
 ---
 
@@ -545,6 +684,22 @@ ABR cannot generalise — only that it did not outperform Direct M under these s
 **Closed-world M declaration:** PPMI vocabulary built from train text only. Test tokens
 outside train vocab receive unk treatment. This is correct protocol (no test leakage into M).
 The OOV rate is a property of the small M corpus, not a protocol violation.
+
+---
+
+## V4.6 → V5.0 Change Record
+
+| Item | V4.6 | V5.0 |
+|------|-------|-------|
+| Text as a complete relational system | Not declared | Added (Origin declaration, 2026-11-13): text contains the four relational primitives (relation, DOF, energy, connection) as observables — not imposed from outside. Consequence: operators are descriptions of what text already does; M at each scale must faithfully encode what that scale contains. |
+| Relational evolution direction | Partial declaration: coherence progression, reverse inadmissible | **Superseded and completed** (Origin declaration, 2026-11-13): direction = left-to-right at all scales; invariant across connection hierarchy; PPMI symmetry is a property of M, not of edge direction; bidirectionality explicitly inadmissible; src=earlier, tgt=later at every scale. |
+| OC-RA-4 | OPEN — bidirectional direction not declared | **CLOSED** (Origin declaration, 2026-11-13): bidirectionality inadmissible; edge direction fully declared. |
+| Multi-Scale M Structure | Not declared | Added (Origin declaration, 2026-11-13): one M per scale; M_char (within words), M_word (within sentences), M_sent (within paragraphs), M_para (within volumes). |
+| Window = scope boundary principle | window=5 declared as "approximation of sentence-proximity scope" | **Superseded**: window is not a free parameter; it is the connection scope of its scale; the scope boundary overrides the count. M_word should admit only within-sentence co-occurrences. |
+| OC-RA-10 | Not listed | OPEN: M_word crosses sentence boundaries (window=5 ignores boundaries); fix requires sentence boundary detection upstream of PPMI. |
+| OC-RA-11 | Not listed | OPEN: M_char not yet built; character-level relational structure undeclared through M. |
+| OC-RA-12 | Not listed | OPEN: ε[e] not integrated into operator path; energy is a primitive; ε[e] weighting of ρ_acc is structurally required. |
+| Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. Multi-scale M and direction declarations strengthen traceability; OC-RA-10/11/12 record where the trace is currently incomplete. |
 
 ---
 
@@ -631,7 +786,9 @@ The OOV rate is a property of the small M corpus, not a protocol violation.
 
 Can every mathematical operation be traced continuously back to declared
 observables through declared operators? Every quantity in this repository
-satisfies this criterion under Declaration V4.0 and Kernel V9.
+satisfies this criterion under Declaration V5.0 and Kernel V9, subject to the
+open conditions OC-RA-10, OC-RA-11, and OC-RA-12 where the trace is currently
+incomplete (M scope boundary, M_char, ε[e] integration).
 
 Kernel V9 scope: this repository is application construction scope
 (kernel_reference.md §4). V9 provenance machinery (IRRS, RPPI,

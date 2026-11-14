@@ -56,6 +56,13 @@ use crate::operators::operator_a;
 ///
 /// Inference cost: O(k) per position, where k = admitted neighborhood size.
 /// Accumulation cost: O(n × W) = O(n) since W is declared and fixed.
+///
+/// ## Energy weighting (OC-RA-12)
+///
+/// When iota weights are provided (via `with_iota`), each pair accumulates
+/// at rate η · (1 + ε[e]) rather than η, where ε[e] = |ι[src] − ι[tgt]|.
+/// Ambient pairs (both ι = 1.0) accumulate at the base rate.
+/// High-emphasis-differential pairs accumulate faster.
 #[derive(Debug)]
 pub struct StreamingField {
     /// All tokens that have arrived, in arrival order.
@@ -77,6 +84,13 @@ pub struct StreamingField {
 
     /// Learning rate η. Declared ETA by default; overridable for calibration (OC-RA-2).
     eta: f64,
+
+    /// Per-token-type emphasis weights ι[v] from SemanticM (OC-RA-12).
+    ///
+    /// iota[token_id] = ι[v] for that token type.
+    /// Empty Vec means all iota are ambient (1.0) — no energy weighting.
+    /// Set via `with_iota`; acquired from SemanticM::iota.
+    iota: Vec<f32>,
 }
 
 impl StreamingField {
@@ -88,6 +102,7 @@ impl StreamingField {
             store:    EdgeStore::new(),
             window:   COHERENCE_WINDOW as usize,
             eta:      ETA,
+            iota:     Vec::new(),
         }
     }
 
@@ -99,6 +114,7 @@ impl StreamingField {
             store:    EdgeStore::new(),
             window,
             eta:      ETA,
+            iota:     Vec::new(),
         }
     }
 
@@ -112,7 +128,36 @@ impl StreamingField {
             store:    EdgeStore::new(),
             window,
             eta,
+            iota:     Vec::new(),
         }
+    }
+
+    /// Set per-token-type emphasis weights from SemanticM (OC-RA-12).
+    ///
+    /// Once set, `arrive` uses energy-weighted accumulation:
+    ///   η_eff = η · (1 + ε[e])  where ε[e] = |ι[src] − ι[tgt]|
+    ///
+    /// Pass `semantic_m.iota.clone()` or a slice of iota values.
+    /// Call before the first token arrives, or after a full reset.
+    pub fn with_iota(mut self, iota: Vec<f32>) -> Self {
+        self.iota = iota;
+        self
+    }
+
+    /// Set iota weights in place (mutable variant of with_iota).
+    pub fn set_iota(&mut self, iota: Vec<f32>) {
+        self.iota = iota;
+    }
+
+    /// Return ε[e] for a (src_token_id, tgt_token_id) pair.
+    ///
+    /// = |ι[src] − ι[tgt]|.  Returns 0.0 if iota is not set (ambient).
+    #[inline]
+    fn epsilon_for(&self, src_token_id: usize, tgt_token_id: usize) -> f32 {
+        if self.iota.is_empty() { return 0.0; }
+        let i_src = self.iota.get(src_token_id).copied().unwrap_or(1.0);
+        let i_tgt = self.iota.get(tgt_token_id).copied().unwrap_or(1.0);
+        (i_src - i_tgt).abs()
     }
 
     /// Return the η this field accumulates at.
@@ -147,7 +192,10 @@ impl StreamingField {
             // Causal pair: source position i < target position j (guaranteed here)
             if let Some(pair) = RelationalPair::declare(src, locus) {
                 let rho_n = operator_a_to_rho_n(&pair, vocab);
-                self.store.update_with_eta(&pair, rho_n, eta);
+                // OC-RA-12: weight accumulation by edge energy ε[e] = |ι[src] − ι[tgt]|.
+                // When iota is not set, epsilon_for returns 0.0 → base rate unchanged.
+                let epsilon = self.epsilon_for(src.token_id, locus.token_id);
+                self.store.update_with_energy(&pair, rho_n, eta, epsilon);
             }
         }
 
@@ -639,5 +687,82 @@ mod tests {
         // We just verify there are admitted pairs; exact threshold depends on float
         assert!(f.store.total_edges() > 0,
             "streaming must produce some edge bindings");
+    }
+
+    // ── OC-RA-12: energy-weighted accumulation ────────────────────────────────
+
+    /// High-energy edge (ε > 0) accumulates faster than ambient (ε = 0).
+    #[test]
+    fn test_energy_weighted_accumulates_faster() {
+        use crate::accumulation::AccumulatedBinding;
+        // Two bindings: same rho_n and eta, different epsilon.
+        let mut ambient = AccumulatedBinding::new();
+        let mut energised = AccumulatedBinding::new();
+        let rho_n = 0.5_f64;
+        // Ambient: epsilon=0 (both tokens at ι=1.0)
+        ambient.accumulate_energy_weighted(rho_n, ETA, 0.0);
+        // Energised: epsilon=2.0 (FIRE! vs ambient: ι=3.0 vs ι=1.0)
+        energised.accumulate_energy_weighted(rho_n, ETA, 2.0);
+        assert!(energised.rho_acc > ambient.rho_acc,
+            "high-energy edge must accumulate faster: {} > {}",
+            energised.rho_acc, ambient.rho_acc);
+    }
+
+    /// Ambient edge with energy weighting equals ambient without it.
+    #[test]
+    fn test_zero_energy_equals_base_rate() {
+        use crate::accumulation::AccumulatedBinding;
+        let mut base = AccumulatedBinding::new();
+        let mut weighted = AccumulatedBinding::new();
+        base.accumulate(0.5, ETA);
+        weighted.accumulate_energy_weighted(0.5, ETA, 0.0);
+        assert!((base.rho_acc - weighted.rho_acc).abs() < 1e-12,
+            "zero energy weighting must equal base rate: {} vs {}",
+            base.rho_acc, weighted.rho_acc);
+    }
+
+    /// Energy-weighted accumulation stays in [0,1] even at high epsilon.
+    #[test]
+    fn test_energy_weighted_stays_bounded() {
+        use crate::accumulation::AccumulatedBinding;
+        let mut b = AccumulatedBinding::new();
+        // High epsilon = 5.0, repeated 1000 times
+        for _ in 0..1000 {
+            b.accumulate_energy_weighted(1.0, ETA, 5.0);
+        }
+        assert!(b.rho_acc <= 1.0 + 1e-12, "rho_acc must not exceed 1.0: {}", b.rho_acc);
+        assert!(b.rho_acc >= 0.0, "rho_acc must be non-negative: {}", b.rho_acc);
+    }
+
+    /// StreamingField with iota set accumulates high-energy pairs faster.
+    #[test]
+    fn test_field_with_iota_weights_edges() {
+        let vocab = small_vocab();
+
+        // Field without iota (ambient)
+        let mut f_ambient = StreamingField::new();
+        // Field with iota: token 0 is high-emphasis (ι=3.0), token 1 is ambient (ι=1.0)
+        // → ε(0→1) = 2.0
+        let iota = vec![3.0_f32, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+        let mut f_energy = StreamingField::new().with_iota(iota);
+
+        // Stream [0, 1] through both fields
+        f_ambient.arrive_sequence(&[0, 1], &vocab);
+        f_energy.arrive_sequence(&[0, 1], &vocab);
+
+        // Pair (token_0 → token_1): energy field must have higher rho_acc
+        let rho_ambient = f_ambient.store.rho_acc_for_pair(0, 1).unwrap_or(0.0);
+        let rho_energy  = f_energy.store.rho_acc_for_pair(0, 1).unwrap_or(0.0);
+        assert!(rho_energy > rho_ambient,
+            "energy-weighted field must bind faster on high-energy pair: {} > {}",
+            rho_energy, rho_ambient);
+    }
+
+    /// Epsilon_for returns 0.0 when iota is not set (backward compatible).
+    #[test]
+    fn test_epsilon_zero_when_no_iota() {
+        let f = StreamingField::new();
+        assert_eq!(f.epsilon_for(0, 1), 0.0,
+            "epsilon must be 0.0 when iota not set");
     }
 }

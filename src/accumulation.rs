@@ -49,6 +49,31 @@ impl AccumulatedBinding {
         debug_assert!(self.rho_acc >= DOMAIN_LOWER && self.rho_acc <= DOMAIN_UPPER);
     }
 
+    /// Apply energy-weighted accumulation rule (OC-RA-12).
+    ///
+    /// ρ_acc ← ρ_acc + η · (1 + ε[e]) · ρₙ · (1 - ρ_acc)
+    ///
+    /// ε[e] = |ι[src] − ι[tgt]| is the edge energy.  Ambient pairs (ε=0)
+    /// accumulate at the base rate η.  High-energy edges (large emphasis
+    /// differential) accumulate faster, bounded by the (1 − ρ_acc) saturation
+    /// term which guarantees ρ_acc ∈ [0,1] regardless of the energy factor.
+    ///
+    /// Declaration (V5.0 — OC-RA-12): energy is a declared primitive.  Every
+    /// pair carries ε[e]; ε=0 is the ambient case, not the absence of energy.
+    pub fn accumulate_energy_weighted(&mut self, rho_n: f64, eta: f64, epsilon: f32) {
+        debug_assert!(rho_n >= DOMAIN_LOWER && rho_n <= DOMAIN_UPPER);
+        debug_assert!(eta > 0.0 && eta <= 1.0);
+        debug_assert!(epsilon >= 0.0, "edge energy must be non-negative");
+        // Energy factor: (1 + ε) scales the base rate; ambient pair (ε=0) is unchanged.
+        // delta is clamped to (1 - rho_acc) so rho_acc cannot exceed DOMAIN_UPPER.
+        let energy_factor = 1.0_f64 + epsilon as f64;
+        let head_room    = (1.0 - self.rho_acc).max(0.0);
+        let delta = (eta * energy_factor * rho_n * head_room).min(head_room);
+        self.rho_acc = (self.rho_acc + delta).min(DOMAIN_UPPER);
+        self.exposure_count += 1;
+        debug_assert!(self.rho_acc >= DOMAIN_LOWER && self.rho_acc <= DOMAIN_UPPER);
+    }
+
     /// Whether this binding is admitted to the active neighbourhood.
     pub fn is_admitted(&self) -> bool {
         self.rho_acc >= THETA_MIN
@@ -95,6 +120,19 @@ impl EdgeStore {
         let key = pair.token_key();
         let binding = self.edges.entry(key).or_insert_with(AccumulatedBinding::new);
         binding.accumulate(rho_n, eta);
+    }
+
+    /// Update binding with explicit η and edge energy ε[e] (OC-RA-12).
+    ///
+    /// Uses the energy-weighted accumulation rule:
+    ///   ρ_acc ← ρ_acc + η · (1 + ε[e]) · ρₙ · (1 - ρ_acc)
+    ///
+    /// This is the declared accumulation rule when M provides iota weights.
+    /// Callers compute ε[e] = |ι[src] − ι[tgt]| from SemanticM::epsilon_edge.
+    pub fn update_with_energy(&mut self, pair: &RelationalPair, rho_n: f64, eta: f64, epsilon: f32) {
+        let key = pair.token_key();
+        let binding = self.edges.entry(key).or_insert_with(AccumulatedBinding::new);
+        binding.accumulate_energy_weighted(rho_n, eta, epsilon);
     }
 
     /// Return admitted source token_ids and their ρ_acc for a given target token_id.

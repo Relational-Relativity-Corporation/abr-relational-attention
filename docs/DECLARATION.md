@@ -420,11 +420,12 @@ now bounded by sentence scope via tokenize_into_sentences (from_corpus).
 Cross-sentence pairs are excluded; within-sentence pairs up to window=5 are admitted.
 OC-RA-10 CLOSED 2026-11-13.
 
-**M_char (not yet built):** Character-level relational structure within words.
-Loci: characters. Window: word boundary. What M_char would encode: morphological
-and orthographic relational structure — which character sequences co-occur within
-words. Natural upstream source: abr-u-tokenizer (character participation patterns
-already computed there). Declared gap: OC-RA-11.
+**M_char (CharM — implemented):** Character-level PPMI within word boundaries.
+Loci: characters. Window: word boundary (all characters within the same word
+co-occur; cross-word pairs inadmissible at character scale). CharM encodes
+morphological and orthographic relational structure — character sequences that
+co-occur within words. CharM::from_corpus builds PPMI over character pairs,
+normalized to [0,1]. 6 tests pass. OC-RA-11 CLOSED 2026-11-13.
 
 **M_sent (not yet built):** Sentence-level relational structure within paragraphs.
 Loci: sentences (or sentence embeddings derived from M_word). Window: paragraph
@@ -667,7 +668,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-8: higher-level connection scopes (sentence, paragraph, volume) -- OPEN (M_sent, M_para not yet built; window=scope principle declared; Origin declaration 2026-11-12/2026-11-13)
 - OC-RA-9: ι[v] / ε[e] through emphasis markers -- **CLOSED** (implemented 2026-11-12; typographic signals only; italics/bold/emotional lexicon remain continuation scope)
 - OC-RA-10: M_word sentence-scope enforcement -- **CLOSED** (tokenize_into_sentences added; from_corpus co-occurrence loop now sentence-scoped; 132 tests pass; 2026-11-13)
-- OC-RA-11: M_char not yet built -- OPEN (character-level relational structure within words undeclared through M; natural upstream source abr-u-tokenizer; declared gap 2026-11-13)
+- OC-RA-11: M_char not yet built -- **CLOSED** (CharM::from_corpus implemented; loci=characters, window=word boundary; PPMI normalized to [0,1]; 6 new tests; 143 total pass; 2026-11-13)
 - OC-RA-12: ε[e] not integrated into operator path -- **CLOSED** (accumulate_energy_weighted added to AccumulatedBinding; ρ_acc ← ρ_acc + η·(1+ε[e])·ρₙ·(1-ρ_acc); EdgeStore::update_with_energy wires it into StreamingField::arrive; SemanticM.iota passed to benchmark field via set_iota; ε=0 ambient equals base rate; 137 tests pass; 2026-11-13)
 
 ---
@@ -758,8 +759,8 @@ it is not the criterion by which ABR is evaluated.
 The goal is a language processing AI grounded in declared relational mathematics. The
 benchmark confirms that the declared operators (A, B, R, ρ, ρ_acc) applied to a
 sentence-scoped PPMI M produce a relational field that generalises. The remaining open
-conditions (OC-RA-11, OC-RA-12, OC-RA-8) are about completing the declaration —
-integrating ε[e] into the operator path, building M_char, building M_sent/M_para.
+condition OC-RA-8 is about completing the declaration —
+building M_sent/M_para. OC-RA-11 (M_char) and OC-RA-12 (ε[e] integration) are now closed.
 Each closure makes the system more complete according to the relational mathematics.
 
 **Run 2 note (post-OC-RA-10, 2026-11-13):** Sentence-scoped PPMI (OC-RA-10 closure)
@@ -785,9 +786,9 @@ corpus reduces OOV rate and increases EdgeStore density — both improve the dec
 | Multi-Scale M Structure | Not declared | Added (Origin declaration, 2026-11-13): one M per scale; M_char (within words), M_word (within sentences), M_sent (within paragraphs), M_para (within volumes). |
 | Window = scope boundary principle | window=5 declared as "approximation of sentence-proximity scope" | **Superseded**: window is not a free parameter; it is the connection scope of its scale; the scope boundary overrides the count. M_word should admit only within-sentence co-occurrences. |
 | OC-RA-10 | Not listed | **CLOSED** (2026-11-13): tokenize_into_sentences added; from_corpus co-occurrence loop now sentence-scoped; 8 new tests; 132 total pass. |
-| OC-RA-11 | Not listed | OPEN: M_char not yet built; character-level relational structure undeclared through M. |
+| OC-RA-11 | Not listed | **CLOSED** (2026-11-13): CharM::from_corpus implemented; loci=characters, window=word boundary; PPMI normalized; 143 tests pass. |
 | OC-RA-12 | Not listed | **CLOSED** (2026-11-13): ρ_acc ← ρ_acc + η·(1+ε[e])·ρₙ·(1-ρ_acc); accumulate_energy_weighted + update_with_energy implemented; iota wired into benchmark field; 137 tests pass. |
-| Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. Multi-scale M and direction declarations strengthen traceability; OC-RA-11 records where the trace is currently incomplete (OC-RA-10, OC-RA-12 now closed). |
+| Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. Multi-scale M and direction declarations strengthen traceability. OC-RA-10, OC-RA-11, OC-RA-12 now closed; OC-RA-8 (M_sent/M_para) remains open. |
 
 ---
 
@@ -875,9 +876,9 @@ corpus reduces OOV rate and increases EdgeStore density — both improve the dec
 Can every mathematical operation be traced continuously back to declared
 observables through declared operators? Every quantity in this repository
 satisfies this criterion under Declaration V5.0 and Kernel V9, subject to the
-open condition OC-RA-11 where the trace is currently incomplete (M_char).
-OC-RA-10 (M_word sentence scope) and OC-RA-12 (ε[e] integration) are
-now closed.
+open condition OC-RA-8 where the trace is currently incomplete (M_sent/M_para).
+OC-RA-10 (M_word sentence scope), OC-RA-11 (M_char), and OC-RA-12 (ε[e]
+integration) are now closed.
 
 Kernel V9 scope: this repository is application construction scope
 (kernel_reference.md §4). V9 provenance machinery (IRRS, RPPI,

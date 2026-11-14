@@ -160,6 +160,7 @@ fn main() {
     println!("  [3/5] Streaming {} train tokens through relational field (chunk={})",
              n_train, CHUNK_SIZE);
     let mut field = StreamingField::new();
+    field.set_iota(sem.iota.clone());
     arrive_chunked(&mut field, &train_ids, &vocab_table, CHUNK_SIZE);
     println!("    Admitted pairs at theta={}: {}",
              THETA_MIN, field.store.admitted_edges_at_threshold(THETA_MIN));

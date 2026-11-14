@@ -543,26 +543,33 @@ The output projection maps the R-field at each token position to vocabulary
 logits for next-token prediction. It is the only gradient-descent-updated
 parameter in the system.
 
-Declared training protocol:
+**Structural isolation of legacy math (2026-11-14):**
+W_O and all associated legacy components (Adam optimizer, cross-entropy loss, Xavier
+initialization) reside exclusively in `src/output_projection.rs`, which is NOT exported
+from the `abr_relational_attention` library crate (`src/lib.rs` does not declare it).
+It is included only by the demo binaries (`src/bin/wo_demo.rs`,
+`src/bin/held_out_benchmark.rs`) via `#[path = "../output_projection.rs"]`.
+The core ABR library exports zero legacy math.
+
+Declared training protocol (demo binaries only):
 - Optimizer: Adam (β₁=0.9, β₂=0.999, lr=1e-3)
 - Loss: cross-entropy over vocabulary
 - Input: R-field vector at each position (last layer, dim=50)
 - Target: next-token identity
 - Initialization: Xavier/Glorot uniform (Glorot & Bengio, 2010); scale = sqrt(6/(fan_in+fan_out))
 
-**Legacy math declaration — W_O initialization:**
-Xavier/Glorot uniform initialization is used in `OutputProjection::new_random()` to set the
-initial W_O weights. This is a legacy ML heuristic not sourced in the ABR kernel. It is
-admitted as the W_O initialization method for the following reasons:
-  (a) W_O is already declared as the sole gradient-descent-updated parameter — its initialization
-      is properly a property of the gradient descent subsystem, not of the ABR relational field.
-  (b) The ABR kernel specifies no initialization protocol; Xavier is the standard choice for
-      linear projections trained with cross-entropy loss.
-  (c) This component is fully isolated: Xavier affects only the starting state of W_O. All
-      relational quantities (A[e], B[e], R[e], ρ_acc, M) are derived without any reference to W_O
-      or its initialization.
-Xavier initialization is an admitted legacy component, isolated to W_O, alongside Adam and
-cross-entropy loss.
+**Legacy math declaration — W_O subsystem:**
+Adam, cross-entropy/log-softmax, and Xavier/Glorot initialization are legacy ML components
+not sourced in the ABR kernel. They are admitted for the following reasons:
+  (a) W_O is declared as the sole gradient-descent-updated parameter — its optimizer, loss,
+      and initialization are properly properties of the gradient descent subsystem, not of the
+      ABR relational field.
+  (b) The ABR kernel specifies no output projection protocol; these are the standard choices
+      for a linear projection trained with cross-entropy loss.
+  (c) These components are fully isolated: they affect only W_O. All relational quantities
+      (A[e], B[e], R[e], ρ_acc, M) are derived without any reference to W_O or these components.
+  (d) They are structurally excluded from the library: a downstream user importing
+      `abr_relational_attention` receives no legacy math.
 
 The relational field (ρ_acc in EdgeStore) is not updated by backprop.
 ABR decouples representation accumulation (topology formation) from

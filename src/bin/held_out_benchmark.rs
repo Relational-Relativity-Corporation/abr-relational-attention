@@ -39,12 +39,18 @@
 //
 //   Or without args: looks for /tmp/wikitext2/{train,test}.txt by default.
 
+// Legacy math (Adam, cross-entropy, Xavier init) lives here, not in the library.
+// output_projection is a demo-only module; it is not exported from abr_relational_attention.
+// src/output_projection.rs is excluded from lib.rs; this #[path] makes it local to this binary.
+#[path = "../output_projection.rs"]
+mod output_projection;
+
 use abr_relational_attention::{
     declaration::{ETA, THETA_MIN, COHERENCE_WINDOW, Locus},
     semantic::SemanticM,
     streaming::StreamingField,
-    output_projection::{OutputProjection, AdamState, train_epoch_adam, evaluate},
 };
+use output_projection::{OutputProjection, AdamState, train_epoch_adam, evaluate};
 
 // ── Declared parameters ────────────────────────────────────────────────────────
 

@@ -49,12 +49,18 @@
 //
 // RUN: cargo run --release --bin wo_demo
 
+// Legacy math (Adam, cross-entropy, Xavier init) lives here, not in the library.
+// output_projection is a demo-only module; it is not exported from abr_relational_attention.
+// src/output_projection.rs is excluded from lib.rs; this #[path] makes it local to this binary.
+#[path = "../output_projection.rs"]
+mod output_projection;
+
 use abr_relational_attention::{
     declaration::{ETA, THETA_MIN, COHERENCE_WINDOW},
     semantic::SemanticM,
     layer_stack::ABRLayerStack,
-    output_projection::{OutputProjection, AdamState, train_epoch_adam, evaluate},
 };
+use output_projection::{OutputProjection, AdamState, train_epoch_adam, evaluate};
 
 const DARWIN_PARAGRAPH: &str = "
 When we look to the individuals of the same variety or sub-variety of our

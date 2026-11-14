@@ -820,13 +820,38 @@ impl CharM {
 /// Each paragraph is itself split into sentences.
 /// Returns Vec<Vec<Vec<String>>> = paragraphs × sentences × tokens.
 pub fn tokenize_into_paragraphs(text: &str) -> Vec<Vec<Vec<String>>> {
-    text.split("\n\n")
-        .map(|para| {
-            let sents = tokenize_into_sentences(para);
-            sents.into_iter().filter(|s| !s.is_empty()).collect()
-        })
-        .filter(|para: &Vec<Vec<String>>| !para.is_empty())
-        .collect()
+    // Split on paragraph boundaries: either \n\n (standard) or lines
+    // containing only whitespace (WikiText-2 format uses " " as blank lines).
+    // Strategy: collect lines, flush a paragraph whenever we hit a blank/whitespace-only line.
+    let mut paragraphs: Vec<Vec<Vec<String>>> = Vec::new();
+    let mut current_lines: Vec<&str> = Vec::new();
+
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            // Blank line = paragraph boundary
+            if !current_lines.is_empty() {
+                let chunk = current_lines.join("\n");
+                let sents: Vec<Vec<String>> = tokenize_into_sentences(&chunk)
+                    .into_iter().filter(|s| !s.is_empty()).collect();
+                if !sents.is_empty() {
+                    paragraphs.push(sents);
+                }
+                current_lines.clear();
+            }
+        } else {
+            current_lines.push(line);
+        }
+    }
+    // Flush trailing paragraph
+    if !current_lines.is_empty() {
+        let chunk = current_lines.join("\n");
+        let sents: Vec<Vec<String>> = tokenize_into_sentences(&chunk)
+            .into_iter().filter(|s| !s.is_empty()).collect();
+        if !sents.is_empty() {
+            paragraphs.push(sents);
+        }
+    }
+    paragraphs
 }
 
 /// Sentence-level PPMI matrix (M_sent).
@@ -1718,13 +1743,19 @@ mod tests {
         assert!(m.vocab_size() >= 1);
     }
 
-    /// tokenize_into_paragraphs splits on double newline.
+    /// tokenize_into_paragraphs splits on blank lines (double newline or whitespace-only lines).
     #[test]
     fn test_tokenize_into_paragraphs() {
+        // Standard double-newline
         let text = "First paragraph with two sentences. And more.\n\nSecond paragraph here.";
         let paras = tokenize_into_paragraphs(text);
         assert_eq!(paras.len(), 2, "must have 2 paragraphs");
         assert_eq!(paras[0].len(), 2, "first paragraph has 2 sentences");
         assert_eq!(paras[1].len(), 1, "second paragraph has 1 sentence");
+
+        // WikiText-2 format: blank lines contain only a space
+        let text2 = "First paragraph sentence one. And two.\n \nSecond paragraph here.";
+        let paras2 = tokenize_into_paragraphs(text2);
+        assert_eq!(paras2.len(), 2, "must have 2 paragraphs (WikiText-2 blank)");
     }
 }

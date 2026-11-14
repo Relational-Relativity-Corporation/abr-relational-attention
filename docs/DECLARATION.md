@@ -666,7 +666,7 @@ Inference:    O(n·k) -- k = mean admitted neighbourhood size.
 
 - OC-RA-1: theta_min calibration (Phase 1) -- **CLOSED** (eta_calibration sweep: θ_min=0.05 discriminative at η=0.1 with Zipf vocabulary; admitted%=92.2% at θ=0.05 after A+B; admitted%=0% below θ=0.05 → threshold admits only recurring pairs; OC-RA-3 generalisation confirmed on WikiText-2; declared finding: θ_min=0.05 admissible; 2026-11-13)
 - OC-RA-2: eta calibration (Phase 1) -- **CLOSED** (eta_calibration sweep: η=0.10 admissible at θ_min=0.05; one exposure admits high-ρₙ pairs; recurrence depth discriminated by θ_min; admissible range η∈[0.05,0.20]; OC-RA-3 generalisation confirmed on WikiText-2; declared finding: η=0.10 admissible; 2026-11-13)
-- OC-RA-3: generalisation -- held-out validation (Phase 1) -- **OPEN (re-opened 2026-11-13)** (Runs 1 and 2 used a direction-violating protocol; corrected benchmark required; see Protocol Correction note below)
+- OC-RA-3: generalisation -- held-out validation (Phase 1) -- **CLOSED (2026-11-13)** (Run 3 corrected causal interleaved protocol: ABR test pplx 233.4 < ABR train pplx 285.7; generalisation criterion holds; Direct M outperforms ABR on this configuration — declared accurate, see OC-RA-3 Benchmark Declaration)
 - OC-RA-4: bidirectional direction -- **CLOSED** (Origin declaration, 2026-11-13; bidirectionality inadmissible; edge direction = relational evolution direction; src=earlier, tgt=later; invariant at all scales)
 - OC-RA-5: window-restricted O(n*k) accumulation (Phase 1) -- **CLOSED** (StreamingField::arrive evaluates each arriving token against at most COHERENCE_WINDOW=64 predecessors; window_start = j.saturating_sub(window); accumulation is O(n·k) not O(n²); declared in streaming.rs header; 2026-11-13)
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
@@ -785,10 +785,32 @@ arrive → inference loop. For each position t, `arrive(test_ids[t])` is called,
 bindings from tokens 0..t. No future test information reaches the prediction at t.
 
 The Run 1 and Run 2 numbers (pplx 237.4, 232.0) were produced by the uncorrected
-protocol and should be treated as provisional. A corrected Run 3 benchmark is required
-to close OC-RA-3 against the monodirectional protocol. The generalisation criterion
-(ABR test pplx < ABR train pplx) remains the stated claim; the corrected benchmark
-will determine whether it still holds under strict causal evaluation.
+protocol and should be treated as provisional. Run 3 (corrected protocol) results follow.
+
+### Results — Run 3 (2026-11-13, corrected causal interleaved protocol)
+
+Direction violation corrected: each test token is arrived before its inference.
+EdgeStore at test position t contains only train bindings plus test bindings 0..t.
+No future test information reaches the prediction at t.
+
+| Condition    | Loss   | Perplexity | Top-1 Acc | Top-5 Acc |
+|--------------|--------|------------|-----------|-----------|
+| ABR train    | 5.6550 | 285.7      | 10.6%     | 25.4%     |
+| ABR test     | 5.4529 | 233.4      | 13.3%     | 32.0%     |
+| Direct train | 4.9586 | 142.4      | 27.7%     | 49.4%     |
+| Direct test  | 4.6155 | 101.0      | 38.4%     | 56.6%     |
+
+Generalisation gap (test − train loss): ABR −0.2021, Direct −0.3431 (underfitting, not overfitting).
+
+**Effect of correcting the direction violation:**
+- ABR test perplexity: 232.0 (Run 2, uncorrected) → 233.4 (Run 3, corrected) (+1.4 pplx, 0.6%)
+- The corrected protocol makes slightly less information available at each inference point
+  (future test tokens no longer contaminate current predictions), so a small pplx increase
+  is the expected direction of change.
+- Generalisation criterion: ABR test (233.4) < ABR train (285.7) → **holds under corrected protocol**.
+
+**OC-RA-3 CLOSED (corrected protocol, 2026-11-13).**
+Generalisation criterion confirmed under strict monodirectional evaluation.
 
 **Closed-world M declaration:** PPMI vocabulary built from train text only. Test tokens
 outside train vocab receive unk treatment. This is correct protocol (no test leakage into M).
@@ -810,7 +832,10 @@ corpus reduces OOV rate and increases EdgeStore density — both improve the dec
 | OC-RA-10 | Not listed | **CLOSED** (2026-11-13): tokenize_into_sentences added; from_corpus co-occurrence loop now sentence-scoped; 8 new tests; 132 total pass. |
 | OC-RA-11 | Not listed | **CLOSED** (2026-11-13): CharM::from_corpus implemented; loci=characters, window=word boundary; PPMI normalized; 143 tests pass. |
 | OC-RA-12 | Not listed | **CLOSED** (2026-11-13): ρ_acc ← ρ_acc + η·(1+ε[e])·ρₙ·(1-ρ_acc); accumulate_energy_weighted + update_with_energy implemented; iota wired into benchmark field; 137 tests pass. |
-| Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. Multi-scale M fully declared: OC-RA-8, OC-RA-10, OC-RA-11, OC-RA-12 all closed. No multi-scale M open conditions remain. |
+| OC-RA-3 protocol violation | Runs 1 and 2 used direction-violating test evaluation (all test bindings pre-accumulated before inference) | **CORRECTED and re-confirmed** (2026-11-13): Run 3 uses causal interleaved evaluation (arrive(t) → inference_at(t) for each t); generalisation criterion ABR test 233.4 < ABR train 285.7 holds under corrected protocol; +1.4 pplx over Run 2 (expected: less future information available). |
+| Multi-scale M paragraph tokenizer | tokenize_into_paragraphs split on "\n\n" only | **Fixed** (2026-11-13): now splits on any whitespace-only line (handles WikiText-2 format where blank lines contain a single space); existing paragraph test extended to cover WikiText-2 blank-line format; 152 tests pass. |
+| Multi-scale M verification | Not verified on real corpus | **Verified** (2026-11-13): multiscale_verify binary confirms all 4 M scales on WikiText-2 slice (20KB): M_char 28 chars, M_word 369 words / 138 sentences, M_sent 147 sentences / 18 paragraphs, M_para 18 paragraphs; all scales domain [0,1] ✓; tokenization consistency verified. |
+| Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. All open conditions (OC-RA-1 through OC-RA-12) now closed. No declaration gaps remain. |
 
 ---
 
@@ -866,7 +891,7 @@ corpus reduces OOV rate and increases EdgeStore density — both improve the dec
 
 | Item | V4.1 | V4.2 |
 |------|-------|-------|
-| OC-RA-3 | OPEN — held-out validation required | CLOSED — OC-RA-3 benchmark 2026-11-12: Direct M (pplx 100.4) outperforms ABR (pplx 237.4) on WikiText-2 10K-token / 407-word PPMI configuration. Result declared accurate. Causes: 40.4% OOV, small corpus, R-field scaling at init. See OC-RA-3 Benchmark Declaration section above. |
+| OC-RA-3 | OPEN — held-out validation required | CLOSED (re-confirmed 2026-11-13) — Run 3 (corrected causal interleaved protocol): ABR test pplx 233.4 < ABR train pplx 285.7; generalisation criterion confirmed. Direct M (pplx 101.0) outperforms ABR (pplx 233.4) at this configuration — declared accurate; causes: 40.4% OOV, small corpus, R-field scaling. See OC-RA-3 Benchmark Declaration. |
 | Domain context note | GloVe-50d embeddings only | PPMI-derived (SemanticM::from_corpus) embeddings are also min-max normalized to [0,1]^dim; ρ_base=1.0 and χ₀=1 declarations apply to both. |
 
 ---

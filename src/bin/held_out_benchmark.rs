@@ -167,33 +167,30 @@ fn main() {
     println!("    Total edge bindings: {}", field.store.total_edges());
 
     // Collect train R-field representations.
-    // Re-stream train tokens for inference: positions are rebuilt from 0 in each
-    // chunk. inference_at reads the settled field (no additional accumulation
-    // occurs because arrive_chunked already finalized the EdgeStore; we re-stream
-    // only to give inference_at a valid positional stream to work with).
     //
-    // Declared: inference uses the settled EdgeStore from the full train stream;
-    // R-field values are therefore conditioned on the full train accumulation.
+    // DECLARATION: the EdgeStore is now settled (single-pass training complete).
+    // We need positional context for inference_at without re-accumulating.
+    // register_positions() appends loci to the stream and advances the frontier
+    // but does NOT touch the EdgeStore — no bindings are updated.
     //
-    // Note: arrive_chunked calls reset_stream() after each chunk and after the
-    // last chunk. We re-stream once more in a single chunk just for inference
-    // position building — CHUNK_SIZE tokens at a time — collecting R-fields per
-    // chunk as we go, to avoid exceeding MAX_SEQUENCE_LENGTH.
+    // This is the declared separation:
+    //   - Accumulation: exactly one pass via arrive_chunked above.
+    //   - Positional reconstruction: via register_positions (stream only).
+    //
+    // Declared: train R-fields are conditioned on the fully-settled EdgeStore
+    // (all 10K train tokens' relational bindings in place). Each position t
+    // therefore has access to relational structure from the entire training corpus,
+    // not only from tokens 0..t. This is the correct declared protocol for W_O
+    // training: W_O learns to map settled relational fields → next-token predictions.
     let mut train_reps: Vec<Vec<f64>> = Vec::with_capacity(n_train_pairs);
     let mut n_novel_train = 0_usize;
-    for (chunk_idx, chunk_ids) in train_ids[..n_train_pairs].chunks(CHUNK_SIZE).enumerate() {
-        // Determine the offset for target indexing
-        let chunk_offset = chunk_idx * CHUNK_SIZE;
-        // Re-stream this chunk for positional inference
-        field.arrive_sequence(chunk_ids, &vocab_table);
-        // Collect R-fields for each position in this chunk (not including last
-        // token which is a target, not a representation source, unless it has a
-        // next-token target still within this chunk)
+    for chunk_ids in train_ids[..n_train_pairs].chunks(CHUNK_SIZE) {
+        // Register positions only — no accumulation.
+        field.register_positions(chunk_ids);
         for local_pos in 0..chunk_ids.len() {
             let (r, n_edges) = field.inference_at(local_pos, &vocab_table, THETA_MIN);
             if n_edges == 0 { n_novel_train += 1; }
             train_reps.push(r);
-            let _ = chunk_offset; // suppress warning — chunk_offset tracked via vec length
         }
         field.reset_stream();
     }

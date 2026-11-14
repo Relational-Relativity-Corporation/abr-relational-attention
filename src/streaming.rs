@@ -221,6 +221,27 @@ impl StreamingField {
         }
     }
 
+    /// Register positions into the stream WITHOUT updating the EdgeStore.
+    ///
+    /// Appends loci to the positional stream and advances the frontier,
+    /// but does NOT evaluate pairs or update any relational bindings.
+    ///
+    /// Use case: reconstruct positional context for `inference_at` after a
+    /// completed accumulation pass, without re-accumulating the same tokens.
+    ///
+    /// Declared single-pass streaming property is preserved:
+    ///   - Accumulation: exactly one pass, via `arrive` / `arrive_sequence`.
+    ///   - Positional reconstruction for inference: via `register_positions`.
+    ///   - The two operations are strictly separated.
+    pub fn register_positions(&mut self, token_ids: &[usize]) {
+        for &token_id in token_ids {
+            let locus = Locus::new(self.frontier, token_id);
+            self.stream.push(locus);
+            self.frontier += 1;
+        }
+        debug_assert!(self.frontier == self.stream.len());
+    }
+
     /// Inference: build the declared relational graph at a window around position j,
     /// apply B → ρ → R, return aggregated output at position j.
     ///
@@ -764,5 +785,57 @@ mod tests {
         let f = StreamingField::new();
         assert_eq!(f.epsilon_for(0, 1), 0.0,
             "epsilon must be 0.0 when iota not set");
+    }
+
+    /// register_positions populates the stream but does NOT update the EdgeStore.
+    ///
+    /// Declared single-pass property: accumulation (arrive) and positional
+    /// reconstruction for inference (register_positions) are strictly separated.
+    /// A second call with the same tokens must leave all binding values unchanged.
+    #[test]
+    fn test_register_positions_no_accumulation() {
+        let vocab = small_vocab();
+        let mut f = StreamingField::new();
+        // Single accumulation pass
+        f.arrive_sequence(&[1, 2, 3], &vocab);
+        let edges_after_arrive = f.store.total_edges();
+        let rho_1_2 = f.store.rho_acc_for_pair(1, 2).unwrap_or(0.0);
+        let rho_2_3 = f.store.rho_acc_for_pair(2, 3).unwrap_or(0.0);
+
+        // Reset positional stream only (EdgeStore persists — this is reset_stream behaviour)
+        f.reset_stream();
+
+        // Register same positions: stream rebuilt, EdgeStore must remain exactly unchanged
+        f.register_positions(&[1, 2, 3]);
+        assert_eq!(f.store.total_edges(), edges_after_arrive,
+            "register_positions must not add new edges");
+        assert_eq!(f.store.rho_acc_for_pair(1, 2).unwrap_or(0.0), rho_1_2,
+            "register_positions must not change rho_acc for pair (1,2)");
+        assert_eq!(f.store.rho_acc_for_pair(2, 3).unwrap_or(0.0), rho_2_3,
+            "register_positions must not change rho_acc for pair (2,3)");
+        // Frontier and stream length must be restored
+        assert_eq!(f.frontier(), 3, "frontier must be 3 after re-registering 3 positions");
+        assert_eq!(f.stream_len(), 3);
+    }
+
+    /// register_positions enables inference on the settled field without re-accumulation.
+    #[test]
+    fn test_register_positions_enables_inference() {
+        let vocab = small_vocab();
+        let mut f = StreamingField::new();
+        f.arrive_sequence(&[1, 2, 3, 4], &vocab);
+        let (r_arrive, n_arrive) = f.inference_at(3, &vocab, THETA_MIN);
+
+        f.reset_stream();
+        f.register_positions(&[1, 2, 3, 4]);
+        let (r_register, n_register) = f.inference_at(3, &vocab, THETA_MIN);
+
+        // Same EdgeStore → same inference output
+        assert_eq!(n_arrive, n_register,
+            "inference edge count must be equal: arrive={} register={}", n_arrive, n_register);
+        for (a, b) in r_arrive.iter().zip(r_register.iter()) {
+            assert!((a - b).abs() < 1e-12,
+                "inference output must be identical: {} vs {}", a, b);
+        }
     }
 }

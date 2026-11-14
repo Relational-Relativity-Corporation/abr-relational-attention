@@ -1,7 +1,7 @@
 # ABR Relational Attention -- M Declaration V5.0
 **Metatron Dynamics, Inc. -- 2026-11-13**
 **Kernel: V9 (kernel_reference.md 2026-10-24)**
-**Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared; V5.0 physical basis, relational evolution direction, multi-scale M**
+**Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared; V5.0 physical basis, relational evolution direction, multi-scale M, OC-RA-10 CLOSED**
 
 ---
 
@@ -193,9 +193,8 @@ corpus text.
 **What M discards:**
 - Character-level relational structure (morphological decomposition)
 - Word order within the co-occurrence window
-- Sentence boundaries within the window (window=5 crosses sentence boundaries
-  without restriction — declared gap; see OC-RA-10)
-- Cross-sentence structure beyond the declared window
+- Cross-sentence structure (now correctly excluded — OC-RA-10 CLOSED 2026-11-13;
+  from_corpus uses tokenize_into_sentences; co-occurrence window bounded by sentence)
 - Tokens below min_count (collapsed to unk_id)
 
 The 50 declared dimensions (PPMI_DIM = 50) are a projection of the word-level degrees
@@ -309,12 +308,12 @@ the scope within which those relations are admitted at each level.
 
 SemanticM (PPMI, window=5) captures word-level connections within a local
 co-occurrence window. Per the window=scope boundary principle (see Multi-Scale M
-Structure below), word-level M should admit only within-sentence co-occurrences.
-The current implementation uses a fixed window=5 that ignores sentence boundaries —
-a declared gap (OC-RA-10).
+Structure below), word-level M admits only within-sentence co-occurrences.
+The implementation (from_corpus, tokenize_into_sentences) now enforces this —
+OC-RA-10 CLOSED 2026-11-13.
 
 What the current M captures from the declared connection hierarchy:
-- Word-level connections within sentence-proximity scope (via window=5): **captured (crosses sentence boundaries — OC-RA-10)**
+- Word-level connections within sentence scope (via window=5, sentence-bounded): **captured — OC-RA-10 CLOSED**
 
 What the declared connection hierarchy admits but M does not yet declare:
 - Character-level connections within words: not encoded (M operates at word level)
@@ -416,10 +415,10 @@ exceeding the sentence-scope energy threshold.
 
 ### Current State of Multi-Scale M
 
-**M_word (SemanticM — implemented):** Word-level PPMI. Currently uses a fixed
-window=5 that ignores sentence boundaries. This violates the window=scope principle.
-Declared gap: OC-RA-10. Fix requires sentence boundary detection in the corpus
-processing pass, upstream of PPMI co-occurrence counting.
+**M_word (SemanticM — implemented):** Word-level PPMI. Co-occurrence window is
+now bounded by sentence scope via tokenize_into_sentences (from_corpus).
+Cross-sentence pairs are excluded; within-sentence pairs up to window=5 are admitted.
+OC-RA-10 CLOSED 2026-11-13.
 
 **M_char (not yet built):** Character-level relational structure within words.
 Loci: characters. Window: word boundary. What M_char would encode: morphological
@@ -667,7 +666,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-7: saturating form χ/(χ₀+χ) -- **CLOSED** (Origin declaration, 2026-11-12)
 - OC-RA-8: higher-level connection scopes (sentence, paragraph, volume) -- OPEN (M_sent, M_para not yet built; window=scope principle declared; Origin declaration 2026-11-12/2026-11-13)
 - OC-RA-9: ι[v] / ε[e] through emphasis markers -- **CLOSED** (implemented 2026-11-12; typographic signals only; italics/bold/emotional lexicon remain continuation scope)
-- OC-RA-10: M_word crosses sentence boundaries -- OPEN (window=5 ignores sentence boundaries; fix requires sentence boundary detection upstream of PPMI co-occurrence counting; declared gap 2026-11-13)
+- OC-RA-10: M_word sentence-scope enforcement -- **CLOSED** (tokenize_into_sentences added; from_corpus co-occurrence loop now sentence-scoped; 132 tests pass; 2026-11-13)
 - OC-RA-11: M_char not yet built -- OPEN (character-level relational structure within words undeclared through M; natural upstream source abr-u-tokenizer; declared gap 2026-11-13)
 - OC-RA-12: ε[e] not integrated into operator path -- OPEN (energy is a primitive of the relational system; ε[e] weighting of ρ_acc accumulation is structurally required; ι stored on SemanticM but operators do not use it; declared gap 2026-11-13)
 
@@ -762,10 +761,10 @@ The OOV rate is a property of the small M corpus, not a protocol violation.
 | OC-RA-4 | OPEN — bidirectional direction not declared | **CLOSED** (Origin declaration, 2026-11-13): bidirectionality inadmissible; edge direction fully declared. |
 | Multi-Scale M Structure | Not declared | Added (Origin declaration, 2026-11-13): one M per scale; M_char (within words), M_word (within sentences), M_sent (within paragraphs), M_para (within volumes). |
 | Window = scope boundary principle | window=5 declared as "approximation of sentence-proximity scope" | **Superseded**: window is not a free parameter; it is the connection scope of its scale; the scope boundary overrides the count. M_word should admit only within-sentence co-occurrences. |
-| OC-RA-10 | Not listed | OPEN: M_word crosses sentence boundaries (window=5 ignores boundaries); fix requires sentence boundary detection upstream of PPMI. |
+| OC-RA-10 | Not listed | **CLOSED** (2026-11-13): tokenize_into_sentences added; from_corpus co-occurrence loop now sentence-scoped; 8 new tests; 132 total pass. |
 | OC-RA-11 | Not listed | OPEN: M_char not yet built; character-level relational structure undeclared through M. |
 | OC-RA-12 | Not listed | OPEN: ε[e] not integrated into operator path; energy is a primitive; ε[e] weighting of ρ_acc is structurally required. |
-| Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. Multi-scale M and direction declarations strengthen traceability; OC-RA-10/11/12 record where the trace is currently incomplete. |
+| Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. Multi-scale M and direction declarations strengthen traceability; OC-RA-11/12 record where the trace is currently incomplete (OC-RA-10 now closed). |
 
 ---
 
@@ -853,8 +852,9 @@ The OOV rate is a property of the small M corpus, not a protocol violation.
 Can every mathematical operation be traced continuously back to declared
 observables through declared operators? Every quantity in this repository
 satisfies this criterion under Declaration V5.0 and Kernel V9, subject to the
-open conditions OC-RA-10, OC-RA-11, and OC-RA-12 where the trace is currently
-incomplete (M scope boundary, M_char, ε[e] integration).
+open conditions OC-RA-11 and OC-RA-12 where the trace is currently
+incomplete (M_char, ε[e] integration). OC-RA-10 (M_word sentence scope)
+is now closed.
 
 Kernel V9 scope: this repository is application construction scope
 (kernel_reference.md §4). V9 provenance machinery (IRRS, RPPI,

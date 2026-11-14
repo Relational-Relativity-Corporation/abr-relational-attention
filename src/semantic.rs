@@ -153,23 +153,31 @@ impl SemanticM {
     /// the corpus statistics directly.
     ///
     /// Method:
-    ///   1. Build co-occurrence counts: count(w, context) for a window of W tokens
-    ///   2. Compute PPMI (positive PMI): max(0, log(P(w,c) / P(w)P(c)))
-    ///   3. Truncate to dim dimensions (the most discriminative context words)
-    ///   4. Normalize to [0,1]^dim
+    ///   1. Tokenize into sentences (OC-RA-10: word-level co-occurrence bounded by sentence scope)
+    ///   2. Build co-occurrence counts: count(w, context) within each sentence, up to window tokens
+    ///   3. Compute PPMI (positive PMI): max(0, log(P(w,c) / P(w)P(c)))
+    ///   4. Truncate to dim dimensions (the most discriminative context words)
+    ///
+    /// ## Declaration (V5.0 — OC-RA-10 CLOSED)
+    ///
+    /// Word-level M (M_word) admits only within-sentence co-occurrences.
+    /// A co-occurrence pair (w, c) is admissible iff both tokens are in the
+    /// same sentence.  Cross-sentence pairs belong to M_sent (OC-RA-8).
     ///
     /// This is a closed-world declared M: the relational structure reflects
-    /// co-occurrence statistics in THIS corpus.
+    /// co-occurrence statistics in THIS corpus, within declared sentence scope.
     pub fn from_corpus(text: &str, dim: usize, window: usize, min_count: usize) -> Self {
-        let tokens = tokenize_text(text);
-        let n = tokens.len();
+        // Tokenize into sentences.  Co-occurrence window is bounded by sentence scope (OC-RA-10).
+        let sentences = tokenize_into_sentences(text);
 
-        // Build vocabulary (frequency-filtered)
-        let mut freq: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-        for t in &tokens { *freq.entry(t.as_str()).or_insert(0) += 1; }
+        // Build vocabulary (frequency-filtered) across all sentences
+        let mut freq: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for sent in &sentences {
+            for t in sent { *freq.entry(t.clone()).or_insert(0) += 1; }
+        }
         let mut words: Vec<String> = freq.iter()
             .filter(|(_, &c)| c >= min_count)
-            .map(|(&w, _)| w.to_string())
+            .map(|(w, _)| w.clone())
             .collect();
         words.sort(); // deterministic ordering
         let vocab_size = words.len();
@@ -182,20 +190,31 @@ impl SemanticM {
             .enumerate()
             .map(|(i, w)| (w.as_str(), i))
             .collect();
-        let token_ids: Vec<Option<usize>> = tokens.iter()
-            .map(|t| word_to_id.get(t.as_str()).copied())
+
+        // Map each sentence to a Vec<Option<usize>> (None for OOV/filtered tokens)
+        let sentence_ids: Vec<Vec<Option<usize>>> = sentences.iter()
+            .map(|sent| sent.iter().map(|t| word_to_id.get(t.as_str()).copied()).collect())
             .collect();
 
-        // Co-occurrence counts
-        let mut cooc = vec![vec![0_f64; vocab_size.min(dim * 2)]; vocab_size];
+        // Co-occurrence counts — sentence-scoped (OC-RA-10).
+        //
+        // For each sentence: count co-occurrences within window, never crossing
+        // the sentence boundary.  Cross-sentence pairs are inadmissible at word
+        // level per the Multi-Scale M Structure declaration (V5.0).
         let context_dim = vocab_size.min(dim * 2);
-        for i in 0..n {
-            if let Some(w) = token_ids[i] {
-                for j in i.saturating_sub(window)..=(i + window).min(n - 1) {
-                    if i == j { continue; }
-                    if let Some(c) = token_ids[j] {
-                        if c < context_dim {
-                            cooc[w][c] += 1.0;
+        let mut cooc = vec![vec![0_f64; context_dim]; vocab_size];
+        for sent_ids in &sentence_ids {
+            let m = sent_ids.len();
+            for i in 0..m {
+                if let Some(w) = sent_ids[i] {
+                    let j_start = i.saturating_sub(window);
+                    let j_end   = (i + window).min(m.saturating_sub(1));
+                    for j in j_start..=j_end {
+                        if i == j { continue; }
+                        if let Some(c) = sent_ids[j] {
+                            if c < context_dim {
+                                cooc[w][c] += 1.0;
+                            }
                         }
                     }
                 }
@@ -469,6 +488,63 @@ pub fn extract_emphasis_tokens(text: &str) -> Vec<(String, f32)> {
     result
 }
 
+/// Tokenize text into sentences, each sentence as a Vec<String> of lowercase tokens.
+///
+/// A sentence boundary is declared at: `.`, `!`, `?`, and paragraph breaks (`\n\n`).
+/// Single newlines are treated as whitespace (soft line breaks within a sentence).
+///
+/// ## Declaration (V5.0 — OC-RA-10)
+///
+/// Per the Multi-Scale M Structure declaration: word-level co-occurrence is
+/// bounded by sentence scope. This function preserves sentence boundaries so
+/// that `from_corpus` can restrict the co-occurrence window to within-sentence
+/// pairs only.  Cross-sentence co-occurrences are not admitted at word level;
+/// they belong to sentence-level M (M_sent, OC-RA-8).
+///
+/// Sentence boundary detection uses punctuation (`.`, `!`, `?`) and double
+/// newlines.  Abbreviations (e.g., "Dr.") are split aggressively — this is
+/// a conservative choice that never merges two sentences at the cost of
+/// occasionally splitting a non-sentence period.  Declared limitation.
+pub fn tokenize_into_sentences(text: &str) -> Vec<Vec<String>> {
+    let mut sentences: Vec<Vec<String>> = Vec::new();
+    let mut current = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '.' | '!' | '?' => {
+                // Sentence boundary: flush current buffer
+                let tokens = tokenize_text(&current);
+                if !tokens.is_empty() {
+                    sentences.push(tokens);
+                }
+                current.clear();
+            }
+            '\n' => {
+                if chars.peek() == Some(&'\n') {
+                    // Paragraph break (double newline) = sentence boundary
+                    chars.next(); // consume second newline
+                    let tokens = tokenize_text(&current);
+                    if !tokens.is_empty() {
+                        sentences.push(tokens);
+                    }
+                    current.clear();
+                } else {
+                    // Single newline: treat as space (soft line break)
+                    current.push(' ');
+                }
+            }
+            _ => { current.push(ch); }
+        }
+    }
+    // Flush any trailing text as the final sentence
+    let tokens = tokenize_text(&current);
+    if !tokens.is_empty() {
+        sentences.push(tokens);
+    }
+    sentences
+}
+
 /// Tokenize text into lowercase word tokens.
 ///
 /// Splits on whitespace and punctuation; lowercases all words.
@@ -476,6 +552,7 @@ pub fn extract_emphasis_tokens(text: &str) -> Vec<(String, f32)> {
 ///
 /// NOTE: This function strips all emphasis signals. Use
 /// `extract_emphasis_tokens` when emphasis (ι[v]) is needed.
+/// For sentence-scoped processing use `tokenize_into_sentences`.
 pub fn tokenize_text(text: &str) -> Vec<String> {
     text.split(|c: char| c.is_whitespace() || (!c.is_alphabetic() && c != '\''))
         .map(|w| w.to_lowercase())
@@ -731,5 +808,128 @@ mod tests {
         let m = SemanticM::from_raw(raw, words);
         assert_eq!(m.dim, 3);
         assert!(m.embeddings.iter().all(|emb| emb.len() == 3));
+    }
+
+    // ── Sentence boundary tests (OC-RA-10) ───────────────────────────────────────
+
+    /// tokenize_into_sentences: single sentence (no terminal punctuation)
+    #[test]
+    fn test_tokenize_sentences_single() {
+        let sents = tokenize_into_sentences("cat sat mat");
+        assert_eq!(sents.len(), 1);
+        assert_eq!(sents[0], vec!["cat", "sat", "mat"]);
+    }
+
+    /// tokenize_into_sentences: period splits into two sentences
+    #[test]
+    fn test_tokenize_sentences_period_split() {
+        let sents = tokenize_into_sentences("cat sat. dog ran.");
+        assert_eq!(sents.len(), 2, "period must produce two sentences, got {:?}", sents);
+        assert_eq!(sents[0], vec!["cat", "sat"]);
+        assert_eq!(sents[1], vec!["dog", "ran"]);
+    }
+
+    /// tokenize_into_sentences: exclamation and question marks also split
+    #[test]
+    fn test_tokenize_sentences_exclaim_question() {
+        let sents = tokenize_into_sentences("FIRE! What now? Stay calm.");
+        assert_eq!(sents.len(), 3, "three terminal marks → three sentences");
+        assert_eq!(sents[0], vec!["fire"]);
+        assert_eq!(sents[1], vec!["what", "now"]);
+        assert_eq!(sents[2], vec!["stay", "calm"]);
+    }
+
+    /// tokenize_into_sentences: double newline splits; single newline is a space
+    #[test]
+    fn test_tokenize_sentences_newline_handling() {
+        let sents = tokenize_into_sentences("cat sat\nmat\n\ndog ran");
+        assert_eq!(sents.len(), 2, "double newline must split, single newline must not");
+        // first sentence: cat + sat + mat (single newline = space)
+        assert!(sents[0].contains(&"cat".to_string()));
+        assert!(sents[0].contains(&"sat".to_string()));
+        assert!(sents[0].contains(&"mat".to_string()));
+        assert_eq!(sents[1], vec!["dog", "ran"]);
+    }
+
+    /// tokenize_into_sentences: empty input yields no sentences
+    #[test]
+    fn test_tokenize_sentences_empty() {
+        let sents = tokenize_into_sentences("");
+        assert!(sents.is_empty());
+    }
+
+    /// tokenize_into_sentences: trailing text with no terminator is a sentence
+    #[test]
+    fn test_tokenize_sentences_no_terminator() {
+        let sents = tokenize_into_sentences("cat sat");
+        assert_eq!(sents.len(), 1);
+        assert_eq!(sents[0], vec!["cat", "sat"]);
+    }
+
+    /// OC-RA-10 enforcement: cross-sentence pairs must NOT co-occur in M_word.
+    ///
+    /// "cat" appears in sentence 1; "ran" appears only in sentence 2.
+    /// With sentence-scoped co-occurrence, they must have zero count in cooc —
+    /// which means their PPMI vectors must be orthogonal / independently computed.
+    ///
+    /// We verify this indirectly: in a two-sentence corpus where "cat" and "ran"
+    /// never share a sentence, the M they produce must be distinct from one where
+    /// they DO share a sentence.
+    #[test]
+    fn test_sentence_boundary_separates_cooccurrence() {
+        // Corpus A: "cat" and "ran" in DIFFERENT sentences — no co-occurrence
+        let corpus_a = "cat sat mat. dog ran here.";
+        // Corpus B: "cat" and "ran" in the SAME sentence — co-occurrence exists
+        let corpus_b = "cat ran mat dog sat here";
+
+        let m_a = SemanticM::from_corpus(corpus_a, 8, 5, 1);
+        let m_b = SemanticM::from_corpus(corpus_b, 8, 5, 1);
+
+        // Both must include "cat" and "ran" in vocabulary
+        let cat_a = m_a.token_id("cat");
+        let ran_a = m_a.token_id("ran");
+        let cat_b = m_b.token_id("cat");
+        let ran_b = m_b.token_id("ran");
+
+        assert_ne!(cat_a, m_a.unk_id, "'cat' must be in corpus_a vocab");
+        assert_ne!(ran_a, m_a.unk_id, "'ran' must be in corpus_a vocab");
+        assert_ne!(cat_b, m_b.unk_id, "'cat' must be in corpus_b vocab");
+        assert_ne!(ran_b, m_b.unk_id, "'ran' must be in corpus_b vocab");
+
+        // The embeddings for "cat" in A and B should differ because in A
+        // "cat" cannot co-occur with "ran"/"dog"/"here" (cross-sentence).
+        // We confirm that the two corpora produce DIFFERENT M structures —
+        // which only holds when sentence boundaries are enforced.
+        let emb_cat_a = &m_a.embeddings[cat_a];
+        let emb_cat_b = &m_b.embeddings[cat_b];
+        let diff: f64 = emb_cat_a.iter().zip(emb_cat_b.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(diff > 1e-9,
+            "corpus_a and corpus_b have different sentence structure; \
+             'cat' embeddings must differ when sentence boundaries are enforced. \
+             diff = {}", diff);
+    }
+
+    /// OC-RA-10 enforcement: within-sentence co-occurrence is preserved.
+    ///
+    /// "cat" and "sat" are in the same sentence — they must still co-occur.
+    #[test]
+    fn test_within_sentence_cooccurrence_preserved() {
+        let corpus = "cat sat mat. dog ran here.";
+        let m = SemanticM::from_corpus(corpus, 8, 2, 1);
+
+        // "cat" and "sat" share sentence 1; their embeddings must not be zero
+        let cat_id = m.token_id("cat");
+        let sat_id = m.token_id("sat");
+
+        assert_ne!(cat_id, m.unk_id, "'cat' must be in vocab");
+        assert_ne!(sat_id, m.unk_id, "'sat' must be in vocab");
+
+        // Both must have non-trivial (non-zero) embeddings (co-occurrence happened)
+        let cat_norm: f64 = m.embeddings[cat_id].iter().map(|v| v * v).sum::<f64>().sqrt();
+        let sat_norm: f64 = m.embeddings[sat_id].iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert!(cat_norm > 1e-9, "'cat' embedding must be non-zero");
+        assert!(sat_norm > 1e-9, "'sat' embedding must be non-zero");
     }
 }

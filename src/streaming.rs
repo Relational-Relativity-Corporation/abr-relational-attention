@@ -38,7 +38,7 @@
 
 use crate::declaration::{
     Locus, RelationalPair, VocabTable,
-    COHERENCE_WINDOW, ETA,
+    COHERENCE_WINDOW, ETA, CHI_0,
 };
 use crate::accumulation::EdgeStore;
 use crate::operators::operator_a;
@@ -371,13 +371,12 @@ impl Default for StreamingField {
 
 /// Compute ρₙ for a declared pair from operator A.
 /// ρₙ = ρ_base · χ/(χ₀+χ),  χ = max|A[e]|
-/// ρ_base = 1.0, χ₀ = 1 (language domain M declaration — see operators.rs RHO_BASE).
+/// ρ_base and χ₀ are M-declared (declaration.rs RHO_BASE and CHI_0).
 fn operator_a_to_rho_n(pair: &RelationalPair, vocab: &VocabTable) -> f64 {
     use crate::operators::RHO_BASE;
     let a = operator_a(&pair.source, &pair.target, vocab);
     let chi: f64 = a.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
-    // χ₀ = 1 (V9 Origin general value; language domain declaration)
-    RHO_BASE * chi / (1.0 + chi)
+    RHO_BASE * chi / (CHI_0 + chi)
 }
 
 /// Apply operator B to a local edge list.
@@ -458,8 +457,9 @@ fn apply_operator_r(
         tgt_to_edges[tp].push(ei);
     }
 
-    // ρ per node: ρ[i] = RHO_BASE · χ[i] / (χ₀ + χ[i]),  χ₀ = 1
+    // ρ per node: ρ[i] = RHO_BASE · χ[i] / (CHI_0 + χ[i])
     // χ[i] = max |A[e]| over all edges incident on node i (source or target).
+    // CHI_0: M-declared reference value (declaration.rs).
     //
     // PERFORMANCE FIX: iterate edges once — O(n_edges × dim) — not O(n_nodes × n_edges × dim).
     // For each edge (sp, tp), compute |A| once and update both endpoint nodes.
@@ -471,8 +471,7 @@ fn apply_operator_r(
         ).unwrap();
         let a = operator_a(&pair.source, &pair.target, vocab);
         let chi: f64 = a.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
-        // χ₀ = 1 (language domain M declaration)
-        let rho = RHO_BASE * chi / (1.0 + chi);
+        let rho = RHO_BASE * chi / (CHI_0 + chi);
         // ρ[node] = max over all incident edges (source or target)
         if rho > rho_node[sp] { rho_node[sp] = rho; }
         if rho > rho_node[tp] { rho_node[tp] = rho; }

@@ -26,6 +26,20 @@ pub const DOMAIN_LOWER: f64 = 0.0;
 /// Derived from domain boundedness. Not a free parameter.
 pub const EPSILON: f64 = 1e-8;
 
+/// χ₀ — saturating reference value for the ρ operator (M-declared, V9 §9).
+///
+/// ρ[i] = ρ_base · χ[i] / (χ₀ + χ[i])
+///
+/// Language domain: χ₀ = 1 unit of normalized embedding distance.
+/// GloVe-50d and PPMI-derived (SemanticM) embeddings are min-max normalized
+/// to [0,1]^dim, so chi = max|A[e]| ∈ [0,1]. χ₀=1 places the midpoint at
+/// the domain ceiling — the saturating form achieves 0.5·ρ_base at chi=1.
+///
+/// V9 general value: 1. Declared by M for the language domain.
+/// This constant couples the declaration to the formula. If the domain
+/// scaling changes (e.g., embeddings normalized to [0,k]^dim), update here.
+pub const CHI_0: f64 = 1.0;
+
 /// Learning rate η — declared by Origin (OC-RA-2 partially closed).
 pub const ETA: f64 = 0.1;
 

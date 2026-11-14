@@ -27,7 +27,7 @@
 //                Antisymmetry comes from succ/pred adjacency of the
 //                declared graph, not from a reverse pair evaluation.
 
-use crate::declaration::{Locus, VocabTable};
+use crate::declaration::{Locus, VocabTable, CHI_0};
 
 pub type Embedding = Vec<f64>;
 
@@ -116,13 +116,14 @@ pub fn operator_a(source: &Locus, target: &Locus, vocab: &VocabTable) -> Embeddi
 
 // ── ρ -- Per-Node Binding Magnitude ─────────────────────────────────────────
 
-/// rho[i] = rho_base * chi[i] / (1 + chi[i])
+/// rho[i] = rho_base * chi[i] / (CHI_0 + chi[i])
 /// chi[i] = max |A[e]| over all edges incident on node i (in or out)
 ///
-/// Canonical V7 (kernel source line 940-948):
+/// Canonical V9 (kernel_reference.md §11):
 ///   chi = maximum declared local asymmetry at node i
 ///   Selection, not aggregation -- preserves strongest asymmetry at i
 ///   Discards direction (absolute value) and weaker incidents
+///   CHI_0: M-declared reference value (see declaration.rs)
 ///
 /// Returns one rho value per sequence position (node).
 pub fn compute_rho(graph: &DeclaredGraph, n_nodes: usize, rho_base: f64) -> Vec<f64> {
@@ -136,7 +137,7 @@ pub fn compute_rho(graph: &DeclaredGraph, n_nodes: usize, rho_base: f64) -> Vec<
                 }
             }
         }
-        rho_base * chi / (1.0 + chi)
+        rho_base * chi / (CHI_0 + chi)
     }).collect()
 }
 

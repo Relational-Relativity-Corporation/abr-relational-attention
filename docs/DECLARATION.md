@@ -653,6 +653,34 @@ form (chi-based, computed from A before B).
 
 ---
 
+## Inference Aggregation Rule
+
+**Declaration: 2026-11-14 (Verifier pass, kernel V9 math check)**
+
+At inference position j, the output of the R-field is aggregated as the **mean**
+over all admitted edges whose target is position j within the coherence window:
+
+    output[j] = (1 / k) · Σ_{e : tgt(e)=j, admitted} R[e]
+
+where k = number of such edges.
+
+**Why mean, not sum:** Each R[e] component traces back through A = M(src) − M(tgt)
+with M ∈ [0,1]^dim. The operators preserve boundedness for a fixed edge set, so each
+R[e] ∈ [−1,1]^dim. A sum grows with k and can violate D = [0,1]^dim as the
+neighbourhood size increases. The mean is bounded for all k and preserves the
+relational field value within the declared domain.
+
+This is analogous to the normalised sum in softmax attention (output = Σ α_i V_i,
+Σ α_i = 1). The 1/k factor is the uniform attention weight over admitted edges.
+
+If j has no admitted edges (novel token with no relational history in the current
+field), output[j] = 0 — declared state: relational zero (not an error).
+
+**Implementation:** `StreamingField::inference_at` (streaming.rs, `n_at_target > 1`
+branch).
+
+---
+
 ## Complexity
 
 Accumulation: O(n·k) -- k = COHERENCE_WINDOW = 64 (OC-RA-5 CLOSED).

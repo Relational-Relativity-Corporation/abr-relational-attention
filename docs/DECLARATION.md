@@ -666,7 +666,7 @@ Inference:    O(n·k) -- k = mean admitted neighbourhood size.
 
 - OC-RA-1: theta_min calibration (Phase 1) -- **CLOSED** (eta_calibration sweep: θ_min=0.05 discriminative at η=0.1 with Zipf vocabulary; admitted%=92.2% at θ=0.05 after A+B; admitted%=0% below θ=0.05 → threshold admits only recurring pairs; OC-RA-3 generalisation confirmed on WikiText-2; declared finding: θ_min=0.05 admissible; 2026-11-13)
 - OC-RA-2: eta calibration (Phase 1) -- **CLOSED** (eta_calibration sweep: η=0.10 admissible at θ_min=0.05; one exposure admits high-ρₙ pairs; recurrence depth discriminated by θ_min; admissible range η∈[0.05,0.20]; OC-RA-3 generalisation confirmed on WikiText-2; declared finding: η=0.10 admissible; 2026-11-13)
-- OC-RA-3: generalisation -- held-out validation (Phase 1) -- **CLOSED (2026-11-13)** (Run 3 corrected causal interleaved protocol: ABR test pplx 233.4 < ABR train pplx 285.7; generalisation criterion holds; Direct M outperforms ABR on this configuration — declared accurate, see OC-RA-3 Benchmark Declaration)
+- OC-RA-3: generalisation -- held-out validation (Phase 1) -- **CLOSED (2026-11-13)** (Run 4, both protocol violations corrected: ABR test pplx 213.8 < ABR train pplx 257.0; generalisation criterion holds; Direct M outperforms ABR on this configuration — declared accurate, see OC-RA-3 Benchmark Declaration)
 - OC-RA-4: bidirectional direction -- **CLOSED** (Origin declaration, 2026-11-13; bidirectionality inadmissible; edge direction = relational evolution direction; src=earlier, tgt=later; invariant at all scales)
 - OC-RA-5: window-restricted O(n*k) accumulation (Phase 1) -- **CLOSED** (StreamingField::arrive evaluates each arriving token against at most COHERENCE_WINDOW=64 predecessors; window_start = j.saturating_sub(window); accumulation is O(n·k) not O(n²); declared in streaming.rs header; 2026-11-13)
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
@@ -785,13 +785,13 @@ arrive → inference loop. For each position t, `arrive(test_ids[t])` is called,
 bindings from tokens 0..t. No future test information reaches the prediction at t.
 
 The Run 1 and Run 2 numbers (pplx 237.4, 232.0) were produced by the uncorrected
-protocol and should be treated as provisional. Run 3 (corrected protocol) results follow.
+direction-violation protocol and should be treated as provisional. Run 3 corrected the
+direction violation but retained a second accumulation bug. Run 4 corrects both.
 
-### Results — Run 3 (2026-11-13, corrected causal interleaved protocol)
+### Results — Run 3 (2026-11-13, direction violation corrected; second accumulation remains)
 
-Direction violation corrected: each test token is arrived before its inference.
-EdgeStore at test position t contains only train bindings plus test bindings 0..t.
-No future test information reaches the prediction at t.
+Direction violation corrected: each test token arrived before its inference.
+*Note: Run 3 retained a second protocol error — see Run 4.*
 
 | Condition    | Loss   | Perplexity | Top-1 Acc | Top-5 Acc |
 |--------------|--------|------------|-----------|-----------|
@@ -800,17 +800,42 @@ No future test information reaches the prediction at t.
 | Direct train | 4.9586 | 142.4      | 27.7%     | 49.4%     |
 | Direct test  | 4.6155 | 101.0      | 38.4%     | 56.6%     |
 
-Generalisation gap (test − train loss): ABR −0.2021, Direct −0.3431 (underfitting, not overfitting).
+**Second accumulation error (found after Run 3):** The train R-field collection loop
+called `arrive_sequence()` to rebuild positional context, but `arrive_sequence` calls
+`arrive()` for each token, which runs `update_with_energy()` — re-accumulating all
+training bindings a second time. The comment claiming "no additional accumulation occurs"
+was false. Train R-fields were computed from a doubly-accumulated EdgeStore.
 
-**Effect of correcting the direction violation:**
-- ABR test perplexity: 232.0 (Run 2, uncorrected) → 233.4 (Run 3, corrected) (+1.4 pplx, 0.6%)
-- The corrected protocol makes slightly less information available at each inference point
-  (future test tokens no longer contaminate current predictions), so a small pplx increase
-  is the expected direction of change.
-- Generalisation criterion: ABR test (233.4) < ABR train (285.7) → **holds under corrected protocol**.
+Fix: `register_positions()` added to `StreamingField`. Appends loci to the positional
+stream and advances the frontier without evaluating pairs or updating the EdgeStore.
+The two operations — accumulation and positional reconstruction — are now strictly
+separated. Run 4 uses `register_positions` for train inference.
 
-**OC-RA-3 CLOSED (corrected protocol, 2026-11-13).**
-Generalisation criterion confirmed under strict monodirectional evaluation.
+### Results — Run 4 (2026-11-13, both protocol violations corrected — DEFINITIVE)
+
+Both fixes applied:
+1. Test evaluation: causal interleaved (arrive → inference per token; committed `cec09f2`)
+2. Train R-field collection: `register_positions` instead of `arrive_sequence` (committed `c95fd0a`)
+
+| Condition    | Loss   | Perplexity | Top-1 Acc | Top-5 Acc |
+|--------------|--------|------------|-----------|-----------|
+| ABR train    | 5.5489 | 257.0      | 9.7%      | 24.9%     |
+| ABR test     | 5.3651 | 213.8      | 14.8%     | 33.8%     |
+| Direct train | 4.9586 | 142.4      | 27.7%     | 49.4%     |
+| Direct test  | 4.6155 | 101.0      | 38.4%     | 56.6%     |
+
+Generalisation gap (test − train loss): ABR −0.1838, Direct −0.3431 (underfitting, not overfitting).
+
+**Effect of correcting the second accumulation error:**
+- ABR test perplexity: 233.4 (Run 3) → 213.8 (Run 4) (−19.6 pplx, −8.4%)
+- ABR train perplexity: 285.7 (Run 3) → 257.0 (Run 4) (−28.7 pplx)
+- Double accumulation was artificially degrading both train and test performance.
+  Removing it improves the settled EdgeStore's relational structure for W_O training.
+- Direct M unchanged (unaffected by the streaming fix): train 142.4, test 101.0.
+- Generalisation criterion: ABR test (213.8) < ABR train (257.0) → **holds**.
+
+**OC-RA-3 CLOSED (Run 4, both protocol violations corrected, 2026-11-13).**
+Generalisation criterion confirmed under strict single-pass causal evaluation.
 
 **Closed-world M declaration:** PPMI vocabulary built from train text only. Test tokens
 outside train vocab receive unk treatment. This is correct protocol (no test leakage into M).
@@ -832,7 +857,8 @@ corpus reduces OOV rate and increases EdgeStore density — both improve the dec
 | OC-RA-10 | Not listed | **CLOSED** (2026-11-13): tokenize_into_sentences added; from_corpus co-occurrence loop now sentence-scoped; 8 new tests; 132 total pass. |
 | OC-RA-11 | Not listed | **CLOSED** (2026-11-13): CharM::from_corpus implemented; loci=characters, window=word boundary; PPMI normalized; 143 tests pass. |
 | OC-RA-12 | Not listed | **CLOSED** (2026-11-13): ρ_acc ← ρ_acc + η·(1+ε[e])·ρₙ·(1-ρ_acc); accumulate_energy_weighted + update_with_energy implemented; iota wired into benchmark field; 137 tests pass. |
-| OC-RA-3 protocol violation | Runs 1 and 2 used direction-violating test evaluation (all test bindings pre-accumulated before inference) | **CORRECTED and re-confirmed** (2026-11-13): Run 3 uses causal interleaved evaluation (arrive(t) → inference_at(t) for each t); generalisation criterion ABR test 233.4 < ABR train 285.7 holds under corrected protocol; +1.4 pplx over Run 2 (expected: less future information available). |
+| OC-RA-3 protocol violation — direction | Runs 1 and 2 used direction-violating test evaluation (all test bindings pre-accumulated before inference) | **CORRECTED** (2026-11-13 `cec09f2`): Run 3 uses causal interleaved evaluation (arrive(t) → inference_at(t) for each t). |
+| OC-RA-3 protocol violation — double accumulation | Train R-field collection loop called arrive_sequence(), which re-accumulated all training bindings a second time; comment "no additional accumulation" was false | **CORRECTED** (2026-11-13 `c95fd0a`): register_positions() added; populates stream without updating EdgeStore; train inference uses settled single-pass EdgeStore. Run 4 corrects both; ABR test pplx 213.8 < ABR train pplx 257.0 (−19.6 pplx vs Run 3 from removing double accumulation). |
 | Multi-scale M paragraph tokenizer | tokenize_into_paragraphs split on "\n\n" only | **Fixed** (2026-11-13): now splits on any whitespace-only line (handles WikiText-2 format where blank lines contain a single space); existing paragraph test extended to cover WikiText-2 blank-line format; 152 tests pass. |
 | Multi-scale M verification | Not verified on real corpus | **Verified** (2026-11-13): multiscale_verify binary confirms all 4 M scales on WikiText-2 slice (20KB): M_char 28 chars, M_word 369 words / 138 sentences, M_sent 147 sentences / 18 paragraphs, M_para 18 paragraphs; all scales domain [0,1] ✓; tokenization consistency verified. |
 | Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. All open conditions (OC-RA-1 through OC-RA-12) now closed. No declaration gaps remain. |
@@ -891,7 +917,7 @@ corpus reduces OOV rate and increases EdgeStore density — both improve the dec
 
 | Item | V4.1 | V4.2 |
 |------|-------|-------|
-| OC-RA-3 | OPEN — held-out validation required | CLOSED (re-confirmed 2026-11-13) — Run 3 (corrected causal interleaved protocol): ABR test pplx 233.4 < ABR train pplx 285.7; generalisation criterion confirmed. Direct M (pplx 101.0) outperforms ABR (pplx 233.4) at this configuration — declared accurate; causes: 40.4% OOV, small corpus, R-field scaling. See OC-RA-3 Benchmark Declaration. |
+| OC-RA-3 | OPEN — held-out validation required | CLOSED (2026-11-13) — Run 4 (both protocol violations corrected: direction + double accumulation): ABR test pplx 213.8 < ABR train pplx 257.0; generalisation criterion confirmed. Direct M (pplx 101.0) outperforms ABR (pplx 213.8) — declared accurate; causes: 40.4% OOV, small corpus, R-field scaling. See OC-RA-3 Benchmark Declaration. |
 | Domain context note | GloVe-50d embeddings only | PPMI-derived (SemanticM::from_corpus) embeddings are also min-max normalized to [0,1]^dim; ρ_base=1.0 and χ₀=1 declarations apply to both. |
 
 ---

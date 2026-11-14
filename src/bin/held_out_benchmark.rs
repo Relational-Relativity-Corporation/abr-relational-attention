@@ -40,7 +40,7 @@
 //   Or without args: looks for /tmp/wikitext2/{train,test}.txt by default.
 
 use abr_relational_attention::{
-    declaration::{ETA, THETA_MIN, COHERENCE_WINDOW},
+    declaration::{ETA, THETA_MIN, COHERENCE_WINDOW, Locus},
     semantic::SemanticM,
     streaming::StreamingField,
     output_projection::{OutputProjection, AdamState, train_epoch_adam, evaluate},
@@ -160,39 +160,37 @@ fn main() {
     println!("  [3/5] Streaming {} train tokens through relational field (chunk={})",
              n_train, CHUNK_SIZE);
     let mut field = StreamingField::new();
+    field.set_iota(sem.iota.clone());
     arrive_chunked(&mut field, &train_ids, &vocab_table, CHUNK_SIZE);
     println!("    Admitted pairs at theta={}: {}",
              THETA_MIN, field.store.admitted_edges_at_threshold(THETA_MIN));
     println!("    Total edge bindings: {}", field.store.total_edges());
 
     // Collect train R-field representations.
-    // Re-stream train tokens for inference: positions are rebuilt from 0 in each
-    // chunk. inference_at reads the settled field (no additional accumulation
-    // occurs because arrive_chunked already finalized the EdgeStore; we re-stream
-    // only to give inference_at a valid positional stream to work with).
     //
-    // Declared: inference uses the settled EdgeStore from the full train stream;
-    // R-field values are therefore conditioned on the full train accumulation.
+    // DECLARATION: the EdgeStore is now settled (single-pass training complete).
+    // We need positional context for inference_at without re-accumulating.
+    // register_positions() appends loci to the stream and advances the frontier
+    // but does NOT touch the EdgeStore — no bindings are updated.
     //
-    // Note: arrive_chunked calls reset_stream() after each chunk and after the
-    // last chunk. We re-stream once more in a single chunk just for inference
-    // position building — CHUNK_SIZE tokens at a time — collecting R-fields per
-    // chunk as we go, to avoid exceeding MAX_SEQUENCE_LENGTH.
+    // This is the declared separation:
+    //   - Accumulation: exactly one pass via arrive_chunked above.
+    //   - Positional reconstruction: via register_positions (stream only).
+    //
+    // Declared: train R-fields are conditioned on the fully-settled EdgeStore
+    // (all 10K train tokens' relational bindings in place). Each position t
+    // therefore has access to relational structure from the entire training corpus,
+    // not only from tokens 0..t. This is the correct declared protocol for W_O
+    // training: W_O learns to map settled relational fields → next-token predictions.
     let mut train_reps: Vec<Vec<f64>> = Vec::with_capacity(n_train_pairs);
     let mut n_novel_train = 0_usize;
-    for (chunk_idx, chunk_ids) in train_ids[..n_train_pairs].chunks(CHUNK_SIZE).enumerate() {
-        // Determine the offset for target indexing
-        let chunk_offset = chunk_idx * CHUNK_SIZE;
-        // Re-stream this chunk for positional inference
-        field.arrive_sequence(chunk_ids, &vocab_table);
-        // Collect R-fields for each position in this chunk (not including last
-        // token which is a target, not a representation source, unless it has a
-        // next-token target still within this chunk)
+    for chunk_ids in train_ids[..n_train_pairs].chunks(CHUNK_SIZE) {
+        // Register positions only — no accumulation.
+        field.register_positions(chunk_ids);
         for local_pos in 0..chunk_ids.len() {
             let (r, n_edges) = field.inference_at(local_pos, &vocab_table, THETA_MIN);
             if n_edges == 0 { n_novel_train += 1; }
             train_reps.push(r);
-            let _ = chunk_offset; // suppress warning — chunk_offset tracked via vec length
         }
         field.reset_stream();
     }
@@ -245,18 +243,33 @@ fn main() {
     // ── 5. Evaluate on held-out test set ─────────────────────────────────────
     println!("  [5/5] Evaluating on held-out test set ({} tokens) ...", n_test);
 
-    // Stream test tokens through field (field accumulates from train state).
-    // Declared: online accumulation continues during test; W_O frozen.
-    // This is not replay — test tokens are new, unseen exposures.
-    // Chunked for same MAX_SEQUENCE_LENGTH reason as train.
-    arrive_chunked(&mut field, &test_ids, &vocab_table, CHUNK_SIZE);
+    // Online causal test evaluation — monodirectional.
+    //
+    // DECLARATION: prediction at position t must use only bindings formed from
+    // tokens 0..t.  The earlier two-phase pattern (arrive_chunked ALL test tokens,
+    // then re-stream for inference) violated this: inference_at(t) read an EdgeStore
+    // already informed by test tokens after t.
+    //
+    // Fix: interleave arrive → inference for each token in order.
+    // After arrive(test_ids[t]), EdgeStore contains only:
+    //   - train bindings (settled before this loop), and
+    //   - test bindings from tokens 0..t.
+    // inference_at(local_pos) then reads that causally-bounded EdgeStore.
+    //
+    // reset_stream() between chunks clears the positional stream (declared
+    // acceptable loss: COHERENCE_WINDOW context lost at chunk boundaries).
+    // The EdgeStore is NOT cleared — train + accumulated test bindings persist.
+    field.reset_stream(); // keep train EdgeStore; clear positional stream
 
-    // Re-stream test for inference (same positional rebuild pattern as train).
     let mut test_reps: Vec<Vec<f64>> = Vec::with_capacity(n_test_pairs);
     let mut n_novel_test = 0_usize;
     for chunk_ids in test_ids[..n_test_pairs].chunks(CHUNK_SIZE) {
-        field.arrive_sequence(chunk_ids, &vocab_table);
-        for local_pos in 0..chunk_ids.len() {
+        for (local_pos, &token_id) in chunk_ids.iter().enumerate() {
+            // Arrive this token: EdgeStore gains bindings from tokens 0..local_pos within
+            // this chunk (plus all prior chunks and train).  No future token influences.
+            let locus = Locus::new(field.frontier(), token_id);
+            field.arrive(locus, &vocab_table);
+            // Inference at this position: reads the causally-bounded EdgeStore.
             let (r, n_edges) = field.inference_at(local_pos, &vocab_table, THETA_MIN);
             if n_edges == 0 { n_novel_test += 1; }
             test_reps.push(r);

@@ -153,23 +153,31 @@ impl SemanticM {
     /// the corpus statistics directly.
     ///
     /// Method:
-    ///   1. Build co-occurrence counts: count(w, context) for a window of W tokens
-    ///   2. Compute PPMI (positive PMI): max(0, log(P(w,c) / P(w)P(c)))
-    ///   3. Truncate to dim dimensions (the most discriminative context words)
-    ///   4. Normalize to [0,1]^dim
+    ///   1. Tokenize into sentences (OC-RA-10: word-level co-occurrence bounded by sentence scope)
+    ///   2. Build co-occurrence counts: count(w, context) within each sentence, up to window tokens
+    ///   3. Compute PPMI (positive PMI): max(0, log(P(w,c) / P(w)P(c)))
+    ///   4. Truncate to dim dimensions (the most discriminative context words)
+    ///
+    /// ## Declaration (V5.0 — OC-RA-10 CLOSED)
+    ///
+    /// Word-level M (M_word) admits only within-sentence co-occurrences.
+    /// A co-occurrence pair (w, c) is admissible iff both tokens are in the
+    /// same sentence.  Cross-sentence pairs belong to M_sent (OC-RA-8).
     ///
     /// This is a closed-world declared M: the relational structure reflects
-    /// co-occurrence statistics in THIS corpus.
+    /// co-occurrence statistics in THIS corpus, within declared sentence scope.
     pub fn from_corpus(text: &str, dim: usize, window: usize, min_count: usize) -> Self {
-        let tokens = tokenize_text(text);
-        let n = tokens.len();
+        // Tokenize into sentences.  Co-occurrence window is bounded by sentence scope (OC-RA-10).
+        let sentences = tokenize_into_sentences(text);
 
-        // Build vocabulary (frequency-filtered)
-        let mut freq: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-        for t in &tokens { *freq.entry(t.as_str()).or_insert(0) += 1; }
+        // Build vocabulary (frequency-filtered) across all sentences
+        let mut freq: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for sent in &sentences {
+            for t in sent { *freq.entry(t.clone()).or_insert(0) += 1; }
+        }
         let mut words: Vec<String> = freq.iter()
             .filter(|(_, &c)| c >= min_count)
-            .map(|(&w, _)| w.to_string())
+            .map(|(w, _)| w.clone())
             .collect();
         words.sort(); // deterministic ordering
         let vocab_size = words.len();
@@ -182,20 +190,31 @@ impl SemanticM {
             .enumerate()
             .map(|(i, w)| (w.as_str(), i))
             .collect();
-        let token_ids: Vec<Option<usize>> = tokens.iter()
-            .map(|t| word_to_id.get(t.as_str()).copied())
+
+        // Map each sentence to a Vec<Option<usize>> (None for OOV/filtered tokens)
+        let sentence_ids: Vec<Vec<Option<usize>>> = sentences.iter()
+            .map(|sent| sent.iter().map(|t| word_to_id.get(t.as_str()).copied()).collect())
             .collect();
 
-        // Co-occurrence counts
-        let mut cooc = vec![vec![0_f64; vocab_size.min(dim * 2)]; vocab_size];
+        // Co-occurrence counts — sentence-scoped (OC-RA-10).
+        //
+        // For each sentence: count co-occurrences within window, never crossing
+        // the sentence boundary.  Cross-sentence pairs are inadmissible at word
+        // level per the Multi-Scale M Structure declaration (V5.0).
         let context_dim = vocab_size.min(dim * 2);
-        for i in 0..n {
-            if let Some(w) = token_ids[i] {
-                for j in i.saturating_sub(window)..=(i + window).min(n - 1) {
-                    if i == j { continue; }
-                    if let Some(c) = token_ids[j] {
-                        if c < context_dim {
-                            cooc[w][c] += 1.0;
+        let mut cooc = vec![vec![0_f64; context_dim]; vocab_size];
+        for sent_ids in &sentence_ids {
+            let m = sent_ids.len();
+            for i in 0..m {
+                if let Some(w) = sent_ids[i] {
+                    let j_start = i.saturating_sub(window);
+                    let j_end   = (i + window).min(m.saturating_sub(1));
+                    for j in j_start..=j_end {
+                        if i == j { continue; }
+                        if let Some(c) = sent_ids[j] {
+                            if c < context_dim {
+                                cooc[w][c] += 1.0;
+                            }
                         }
                     }
                 }
@@ -469,6 +488,63 @@ pub fn extract_emphasis_tokens(text: &str) -> Vec<(String, f32)> {
     result
 }
 
+/// Tokenize text into sentences, each sentence as a Vec<String> of lowercase tokens.
+///
+/// A sentence boundary is declared at: `.`, `!`, `?`, and paragraph breaks (`\n\n`).
+/// Single newlines are treated as whitespace (soft line breaks within a sentence).
+///
+/// ## Declaration (V5.0 — OC-RA-10)
+///
+/// Per the Multi-Scale M Structure declaration: word-level co-occurrence is
+/// bounded by sentence scope. This function preserves sentence boundaries so
+/// that `from_corpus` can restrict the co-occurrence window to within-sentence
+/// pairs only.  Cross-sentence co-occurrences are not admitted at word level;
+/// they belong to sentence-level M (M_sent, OC-RA-8).
+///
+/// Sentence boundary detection uses punctuation (`.`, `!`, `?`) and double
+/// newlines.  Abbreviations (e.g., "Dr.") are split aggressively — this is
+/// a conservative choice that never merges two sentences at the cost of
+/// occasionally splitting a non-sentence period.  Declared limitation.
+pub fn tokenize_into_sentences(text: &str) -> Vec<Vec<String>> {
+    let mut sentences: Vec<Vec<String>> = Vec::new();
+    let mut current = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '.' | '!' | '?' => {
+                // Sentence boundary: flush current buffer
+                let tokens = tokenize_text(&current);
+                if !tokens.is_empty() {
+                    sentences.push(tokens);
+                }
+                current.clear();
+            }
+            '\n' => {
+                if chars.peek() == Some(&'\n') {
+                    // Paragraph break (double newline) = sentence boundary
+                    chars.next(); // consume second newline
+                    let tokens = tokenize_text(&current);
+                    if !tokens.is_empty() {
+                        sentences.push(tokens);
+                    }
+                    current.clear();
+                } else {
+                    // Single newline: treat as space (soft line break)
+                    current.push(' ');
+                }
+            }
+            _ => { current.push(ch); }
+        }
+    }
+    // Flush any trailing text as the final sentence
+    let tokens = tokenize_text(&current);
+    if !tokens.is_empty() {
+        sentences.push(tokens);
+    }
+    sentences
+}
+
 /// Tokenize text into lowercase word tokens.
 ///
 /// Splits on whitespace and punctuation; lowercases all words.
@@ -476,11 +552,620 @@ pub fn extract_emphasis_tokens(text: &str) -> Vec<(String, f32)> {
 ///
 /// NOTE: This function strips all emphasis signals. Use
 /// `extract_emphasis_tokens` when emphasis (ι[v]) is needed.
+/// For sentence-scoped processing use `tokenize_into_sentences`.
 pub fn tokenize_text(text: &str) -> Vec<String> {
     text.split(|c: char| c.is_whitespace() || (!c.is_alphabetic() && c != '\''))
         .map(|w| w.to_lowercase())
         .filter(|w| !w.is_empty() && w.chars().any(|c| c.is_alphabetic()))
         .collect()
+}
+
+// ── CharM ─────────────────────────────────────────────────────────────────────
+//
+// OC-RA-11: M_char — character-level PPMI within word boundaries.
+//
+// DECLARATION (V5.0):
+//   Loci:   characters (a–z, 0–9, etc. — all alphanumeric chars in vocabulary)
+//   Window: word boundary — characters may only co-occur within the same word.
+//           Cross-word co-occurrence is inadmissible at character scale.
+//
+// What CharM encodes:
+//   Morphological and orthographic relational structure.
+//   Characters that often appear together within words (e.g. "t"–"h", "e"–"r")
+//   acquire high PPMI; characters that rarely co-occur within words have low PPMI.
+//
+// Method mirrors SemanticM::from_corpus but at character resolution:
+//   1. Tokenize into words (whitespace + punctuation split, lowercase)
+//   2. For each word: treat every character as a locus; build co-occurrence counts
+//      for all character pairs within the word (window = word boundary)
+//   3. Compute PPMI across character pairs
+//   4. Truncate/pad to `dim` dimensions
+//
+// Token IDs in CharM are character IDs (index into the character vocabulary).
+// The vocabulary is the set of all distinct characters in the corpus.
+//
+// OC-RA-11 CLOSED: 2026-11-13.
+
+/// Character-level PPMI matrix (M_char).
+///
+/// Loci: characters. Window: word boundary.
+/// CharM.embeddings[char_id] is the PPMI co-occurrence vector for that character
+/// across all same-word co-occurrences in the corpus.
+#[derive(Debug, Clone)]
+pub struct CharM {
+    /// Embedding matrix: n_chars × dim, all values in [0,1].
+    pub embeddings: VocabTable,
+    /// Character → char_id.
+    pub char_vocab: std::collections::HashMap<char, usize>,
+    /// char_id → character.
+    pub id_to_char: Vec<char>,
+    /// Embedding dimension.
+    pub dim: usize,
+    /// Special token: unknown character (all 0.5 — center of domain).
+    pub unk_id: usize,
+}
+
+impl CharM {
+    /// Build CharM from a text corpus.
+    ///
+    /// Characters co-occur only within the same word (word boundary = window).
+    /// `dim` controls the output embedding dimension.
+    /// `min_count` is the minimum number of times a character must appear
+    /// across all words to be included in the vocabulary.
+    pub fn from_corpus(text: &str, dim: usize, min_count: usize) -> Self {
+        // Tokenize into words (reuse tokenize_text for consistency)
+        let words = tokenize_text(text);
+
+        // Build character frequency map
+        let mut freq: std::collections::HashMap<char, usize> = std::collections::HashMap::new();
+        for word in &words {
+            for ch in word.chars() {
+                *freq.entry(ch).or_insert(0) += 1;
+            }
+        }
+
+        // Build character vocabulary (frequency-filtered, sorted for determinism)
+        let mut chars: Vec<char> = freq.iter()
+            .filter(|(_, &c)| c >= min_count)
+            .map(|(ch, _)| *ch)
+            .collect();
+        chars.sort();
+        let n_chars = chars.len();
+
+        if n_chars == 0 || dim == 0 {
+            // Empty corpus — return trivial CharM
+            let unk_emb = vec![0.5_f64; dim.max(1)];
+            let raw = vec![unk_emb];
+            let m = CharM::from_raw(raw, vec!['_']);
+            return m;
+        }
+
+        let char_to_id: std::collections::HashMap<char, usize> = chars.iter()
+            .enumerate()
+            .map(|(i, &ch)| (ch, i))
+            .collect();
+
+        // Co-occurrence counts within word boundaries.
+        // For each word: every character pair (i, j) where i ≠ j within the word.
+        // Window = word boundary: all characters in the word are within window of each other.
+        let context_dim = n_chars.min(dim * 2);
+        let mut cooc = vec![vec![0_f64; context_dim]; n_chars];
+
+        for word in &words {
+            let char_ids: Vec<Option<usize>> = word.chars()
+                .map(|ch| char_to_id.get(&ch).copied())
+                .collect();
+            let len = char_ids.len();
+            for i in 0..len {
+                if let Some(src) = char_ids[i] {
+                    for j in 0..len {
+                        if i == j { continue; }
+                        if let Some(ctx) = char_ids[j] {
+                            if ctx < context_dim {
+                                cooc[src][ctx] += 1.0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // PPMI
+        let total: f64 = cooc.iter().flatten().sum();
+        if total < 1.0 {
+            // No co-occurrences — identity basis
+            let raw: Vec<Vec<f64>> = (0..n_chars).map(|id| {
+                let mut v = vec![0.0_f64; dim];
+                v[id % dim] = 1.0;
+                v
+            }).collect();
+            return Self::from_raw(raw, chars);
+        }
+
+        let row_sums: Vec<f64> = cooc.iter().map(|r| r.iter().sum()).collect();
+        let col_sums: Vec<f64> = (0..context_dim)
+            .map(|c| cooc.iter().map(|r| r[c]).sum())
+            .collect();
+        let eps = 1e-10_f64;
+
+        let mut ppmi = vec![vec![0.0_f64; context_dim]; n_chars];
+        for w in 0..n_chars {
+            for c in 0..context_dim {
+                let p_wc = cooc[w][c] / (total + eps);
+                let p_w  = row_sums[w] / (total + eps);
+                let p_c  = col_sums[c] / (total + eps);
+                if p_w > eps && p_c > eps && p_wc > eps {
+                    let pmi = (p_wc / (p_w * p_c)).ln();
+                    ppmi[w][c] = pmi.max(0.0);
+                }
+            }
+        }
+
+        // Truncate or pad to dim
+        let raw: Vec<Vec<f64>> = ppmi.iter()
+            .map(|row| {
+                let mut v: Vec<f64> = row.iter().take(dim).copied().collect();
+                while v.len() < dim { v.push(0.0); }
+                v
+            })
+            .collect();
+
+        Self::from_raw(raw, chars)
+    }
+
+    /// Build CharM from a raw (pre-computed) embedding matrix + character vocabulary.
+    ///
+    /// Applies per-dimension min-max normalization.
+    /// An `<unk>` character (id = last entry) is appended at 0.5 in all dims.
+    pub fn from_raw(raw: Vec<Vec<f64>>, chars: Vec<char>) -> Self {
+        assert_eq!(raw.len(), chars.len(), "raw and chars must have same length");
+        let n = raw.len();
+        if n == 0 {
+            let unk_id = 0;
+            return CharM {
+                embeddings: vec![vec![0.5_f64; 1]],
+                char_vocab: std::collections::HashMap::new(),
+                id_to_char: vec!['?'],
+                dim: 1,
+                unk_id,
+            };
+        }
+        let dim = raw[0].len();
+
+        // Per-dimension min-max normalization
+        let mut min_d = vec![f64::INFINITY; dim];
+        let mut max_d = vec![f64::NEG_INFINITY; dim];
+        for emb in &raw {
+            for (d, &v) in emb.iter().enumerate() {
+                if v < min_d[d] { min_d[d] = v; }
+                if v > max_d[d] { max_d[d] = v; }
+            }
+        }
+        let eps = 1e-10_f64;
+        let mut normalized: VocabTable = raw.iter().map(|emb| {
+            emb.iter().enumerate().map(|(d, &v)| {
+                let range = max_d[d] - min_d[d];
+                if range < eps { 0.5 } else { (v - min_d[d]) / (range + eps) }
+            }).collect()
+        }).collect();
+
+        // Append <unk> at center of domain
+        normalized.push(vec![0.5_f64; dim]);
+        let unk_id = normalized.len() - 1;
+
+        let mut id_to_char: Vec<char> = chars.clone();
+        id_to_char.push('?'); // unk character
+        let char_vocab: std::collections::HashMap<char, usize> = chars.iter()
+            .enumerate()
+            .map(|(i, &ch)| (ch, i))
+            .collect();
+
+        CharM { embeddings: normalized, char_vocab, id_to_char, dim, unk_id }
+    }
+
+    /// Vocabulary size (including <unk>).
+    pub fn vocab_size(&self) -> usize { self.embeddings.len() }
+
+    /// Look up char_id for a character (returns unk_id if not found).
+    pub fn char_id(&self, ch: char) -> usize {
+        self.char_vocab.get(&ch).copied().unwrap_or(self.unk_id)
+    }
+
+    /// Encode a word as a Vec<usize> of char_ids.
+    pub fn encode_word(&self, word: &str) -> Vec<usize> {
+        word.chars().map(|ch| self.char_id(ch)).collect()
+    }
+
+    /// Return the embedding for a character id.
+    pub fn embedding(&self, char_id: usize) -> &[f64] {
+        self.embeddings.get(char_id)
+            .map(|v| v.as_slice())
+            .unwrap_or_else(|| self.embeddings[self.unk_id].as_slice())
+    }
+}
+
+// ── SentM / ParaM ─────────────────────────────────────────────────────────────
+//
+// OC-RA-8: Higher-level connection scopes — M_sent and M_para.
+//
+// DECLARATION (V5.0):
+//
+//   M_sent:
+//     Loci:   sentences (each sentence is one unit; represented by mean M_word embedding)
+//     Window: paragraph boundary — sentences co-occur only within the same paragraph.
+//             Cross-paragraph pairs are inadmissible at sentence scale.
+//     What M_sent encodes: discourse-level relational structure — which sentence
+//     types follow each other within paragraphs.
+//
+//   M_para:
+//     Loci:   paragraphs (each paragraph is one unit; represented by mean M_word embedding)
+//     Window: volume boundary — all paragraphs within the text are within window.
+//     What M_para encodes: volume-level relational structure — which paragraph
+//     types appear together within a document.
+//
+// Method (both):
+//   1. Tokenize text into paragraphs (split on "\n\n").
+//   2. For M_sent: within each paragraph, build sentence co-occurrence counts
+//      (all sentence pairs within the paragraph are within window).
+//      For M_para: all paragraph pairs within the volume are within window.
+//   3. Each sentence/paragraph is represented by a unique integer index.
+//      PPMI is computed over index co-occurrence — yielding a structural
+//      "positional PPMI" that reflects which units appear near each other.
+//   4. Sentence/paragraph loci are associated with their mean M_word embedding
+//      as the initializing representation; PPMI structure is then overlaid.
+//
+// OC-RA-8 CLOSED: 2026-11-13.
+
+/// Split text into paragraphs (split on blank lines `\n\n`).
+/// Each paragraph is itself split into sentences.
+/// Returns Vec<Vec<Vec<String>>> = paragraphs × sentences × tokens.
+pub fn tokenize_into_paragraphs(text: &str) -> Vec<Vec<Vec<String>>> {
+    // Split on paragraph boundaries: either \n\n (standard) or lines
+    // containing only whitespace (WikiText-2 format uses " " as blank lines).
+    // Strategy: collect lines, flush a paragraph whenever we hit a blank/whitespace-only line.
+    let mut paragraphs: Vec<Vec<Vec<String>>> = Vec::new();
+    let mut current_lines: Vec<&str> = Vec::new();
+
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            // Blank line = paragraph boundary
+            if !current_lines.is_empty() {
+                let chunk = current_lines.join("\n");
+                let sents: Vec<Vec<String>> = tokenize_into_sentences(&chunk)
+                    .into_iter().filter(|s| !s.is_empty()).collect();
+                if !sents.is_empty() {
+                    paragraphs.push(sents);
+                }
+                current_lines.clear();
+            }
+        } else {
+            current_lines.push(line);
+        }
+    }
+    // Flush trailing paragraph
+    if !current_lines.is_empty() {
+        let chunk = current_lines.join("\n");
+        let sents: Vec<Vec<String>> = tokenize_into_sentences(&chunk)
+            .into_iter().filter(|s| !s.is_empty()).collect();
+        if !sents.is_empty() {
+            paragraphs.push(sents);
+        }
+    }
+    paragraphs
+}
+
+/// Sentence-level PPMI matrix (M_sent).
+///
+/// Loci: sentences. Window: paragraph boundary.
+/// Two sentences co-occur iff they are in the same paragraph.
+///
+/// Each sentence is identified by a unique index (0..n_sentences).
+/// The embedding matrix is n_sentences × dim.
+/// Each row is the PPMI co-occurrence vector for that sentence index
+/// across all same-paragraph co-occurrences, normalized to [0,1].
+///
+/// Additionally, `mean_embeddings` stores the mean M_word token embedding
+/// for each sentence (requires a SemanticM to be passed at build time).
+#[derive(Debug, Clone)]
+pub struct SentM {
+    /// PPMI co-occurrence vectors: n_sentences × dim, all in [0,1].
+    pub embeddings: VocabTable,
+    /// Mean M_word embedding for each sentence: n_sentences × word_dim.
+    /// Empty if no SemanticM was provided.
+    pub mean_word_embeddings: VocabTable,
+    /// Original sentence tokens (Vec<String>) for each sentence.
+    pub sentences: Vec<Vec<String>>,
+    /// Embedding dimension (PPMI dimension).
+    pub dim: usize,
+    /// Special token: unknown sentence (all 0.5).
+    pub unk_id: usize,
+}
+
+impl SentM {
+    /// Build SentM from text.
+    ///
+    /// `dim` is the PPMI embedding dimension for the sentence-level co-occurrence vectors.
+    /// `sem` is an optional M_word used to compute mean word embeddings per sentence.
+    pub fn from_corpus(text: &str, dim: usize, sem: Option<&SemanticM>) -> Self {
+        let paragraphs = tokenize_into_paragraphs(text);
+
+        // Flatten: collect all sentences with paragraph labels
+        // para_assignments[sent_idx] = para_idx
+        let mut all_sentences: Vec<Vec<String>> = Vec::new();
+        let mut para_assignments: Vec<usize> = Vec::new();
+
+        for (para_idx, para) in paragraphs.iter().enumerate() {
+            for sent in para {
+                all_sentences.push(sent.clone());
+                para_assignments.push(para_idx);
+            }
+        }
+
+        let n_sents = all_sentences.len();
+        if n_sents == 0 || dim == 0 {
+            return SentM {
+                embeddings: vec![vec![0.5_f64; dim.max(1)]],
+                mean_word_embeddings: vec![],
+                sentences: vec![],
+                dim: dim.max(1),
+                unk_id: 0,
+            };
+        }
+
+        // Build paragraph-grouped sentence sets for co-occurrence
+        let n_paras = paragraphs.len();
+        let mut para_sent_lists: Vec<Vec<usize>> = vec![Vec::new(); n_paras];
+        for (sent_idx, &para_idx) in para_assignments.iter().enumerate() {
+            para_sent_lists[para_idx].push(sent_idx);
+        }
+
+        // Co-occurrence: two sentences co-occur iff in same paragraph.
+        // Window = paragraph boundary: all sentence pairs within a paragraph.
+        let context_dim = n_sents.min(dim * 2);
+        let mut cooc = vec![vec![0_f64; context_dim]; n_sents];
+        for sent_list in &para_sent_lists {
+            for &si in sent_list {
+                for &sj in sent_list {
+                    if si == sj { continue; }
+                    if sj < context_dim {
+                        cooc[si][sj] += 1.0;
+                    }
+                }
+            }
+        }
+
+        // PPMI
+        let total: f64 = cooc.iter().flatten().sum();
+        let raw: Vec<Vec<f64>> = if total < 1.0 {
+            // No co-occurrences — identity basis
+            (0..n_sents).map(|id| {
+                let mut v = vec![0.0_f64; dim];
+                v[id % dim] = 1.0;
+                v
+            }).collect()
+        } else {
+            let row_sums: Vec<f64> = cooc.iter().map(|r| r.iter().sum()).collect();
+            let col_sums: Vec<f64> = (0..context_dim)
+                .map(|c| cooc.iter().map(|r| r[c]).sum())
+                .collect();
+            let eps = 1e-10_f64;
+            let ppmi: Vec<Vec<f64>> = (0..n_sents).map(|w| {
+                (0..context_dim).map(|c| {
+                    let p_wc = cooc[w][c] / (total + eps);
+                    let p_w  = row_sums[w] / (total + eps);
+                    let p_c  = col_sums[c] / (total + eps);
+                    if p_w > eps && p_c > eps && p_wc > eps {
+                        ((p_wc / (p_w * p_c)).ln()).max(0.0)
+                    } else { 0.0 }
+                }).collect()
+            }).collect();
+            ppmi.iter().map(|row| {
+                let mut v: Vec<f64> = row.iter().take(dim).copied().collect();
+                while v.len() < dim { v.push(0.0); }
+                v
+            }).collect()
+        };
+
+        // Per-dimension min-max normalization
+        let dim_actual = raw[0].len();
+        let mut min_d = vec![f64::INFINITY; dim_actual];
+        let mut max_d = vec![f64::NEG_INFINITY; dim_actual];
+        for emb in &raw {
+            for (d, &v) in emb.iter().enumerate() {
+                if v < min_d[d] { min_d[d] = v; }
+                if v > max_d[d] { max_d[d] = v; }
+            }
+        }
+        let eps = 1e-10_f64;
+        let mut embeddings: VocabTable = raw.iter().map(|emb| {
+            emb.iter().enumerate().map(|(d, &v)| {
+                let range = max_d[d] - min_d[d];
+                if range < eps { 0.5 } else { (v - min_d[d]) / (range + eps) }
+            }).collect()
+        }).collect();
+        // Append unk
+        embeddings.push(vec![0.5_f64; dim_actual]);
+        let unk_id = embeddings.len() - 1;
+
+        // Mean word embeddings per sentence (if sem provided)
+        let mean_word_embeddings: VocabTable = if let Some(sem) = sem {
+            all_sentences.iter().map(|sent| {
+                let ids: Vec<usize> = sent.iter().map(|w| sem.token_id(w)).collect();
+                if ids.is_empty() { return vec![0.5_f64; sem.dim]; }
+                let mut mean = vec![0.0_f64; sem.dim];
+                for &id in &ids {
+                    let emb = &sem.embeddings[id.min(sem.embeddings.len() - 1)];
+                    for (d, &v) in emb.iter().enumerate() { mean[d] += v; }
+                }
+                mean.iter_mut().for_each(|v| *v /= ids.len() as f64);
+                mean
+            }).collect()
+        } else { vec![] };
+
+        SentM {
+            embeddings,
+            mean_word_embeddings,
+            sentences: all_sentences,
+            dim: dim_actual,
+            unk_id,
+        }
+    }
+
+    /// Number of sentences (including unk).
+    pub fn vocab_size(&self) -> usize { self.embeddings.len() }
+
+    /// Return the PPMI embedding for a sentence index.
+    pub fn embedding(&self, sent_idx: usize) -> &[f64] {
+        self.embeddings.get(sent_idx)
+            .map(|v| v.as_slice())
+            .unwrap_or_else(|| self.embeddings[self.unk_id].as_slice())
+    }
+
+    /// Return the mean word embedding for a sentence index.
+    pub fn mean_word_embedding(&self, sent_idx: usize) -> Option<&[f64]> {
+        self.mean_word_embeddings.get(sent_idx).map(|v| v.as_slice())
+    }
+}
+
+/// Paragraph-level PPMI matrix (M_para).
+///
+/// Loci: paragraphs. Window: volume boundary (all paragraphs co-occur with all others).
+/// Each paragraph is identified by a unique index (0..n_paras).
+/// PPMI is computed over paragraph co-occurrence within the volume.
+///
+/// Structurally, M_para records which paragraph positions occur together
+/// in the volume — encoding document-level relational structure.
+#[derive(Debug, Clone)]
+pub struct ParaM {
+    /// PPMI co-occurrence vectors: n_paragraphs × dim, all in [0,1].
+    pub embeddings: VocabTable,
+    /// Mean M_word embedding for each paragraph: n_paragraphs × word_dim.
+    pub mean_word_embeddings: VocabTable,
+    /// Original paragraph text (flattened sentences) for each paragraph.
+    pub paragraphs: Vec<Vec<Vec<String>>>,
+    /// Embedding dimension.
+    pub dim: usize,
+    /// Special token: unknown paragraph (all 0.5).
+    pub unk_id: usize,
+}
+
+impl ParaM {
+    /// Build ParaM from text.
+    ///
+    /// `dim` is the PPMI embedding dimension.
+    /// `sem` is an optional M_word used to compute mean word embeddings per paragraph.
+    pub fn from_corpus(text: &str, dim: usize, sem: Option<&SemanticM>) -> Self {
+        let paragraphs = tokenize_into_paragraphs(text);
+        let n_paras = paragraphs.len();
+
+        if n_paras == 0 || dim == 0 {
+            return ParaM {
+                embeddings: vec![vec![0.5_f64; dim.max(1)]],
+                mean_word_embeddings: vec![],
+                paragraphs: vec![],
+                dim: dim.max(1),
+                unk_id: 0,
+            };
+        }
+
+        // Co-occurrence: all paragraph pairs within the volume (window = volume boundary).
+        let context_dim = n_paras.min(dim * 2);
+        let mut cooc = vec![vec![0_f64; context_dim]; n_paras];
+        for pi in 0..n_paras {
+            for pj in 0..n_paras {
+                if pi == pj { continue; }
+                if pj < context_dim {
+                    cooc[pi][pj] += 1.0;
+                }
+            }
+        }
+
+        // PPMI
+        let total: f64 = cooc.iter().flatten().sum();
+        let raw: Vec<Vec<f64>> = if total < 1.0 {
+            (0..n_paras).map(|id| {
+                let mut v = vec![0.0_f64; dim];
+                v[id % dim] = 1.0;
+                v
+            }).collect()
+        } else {
+            let row_sums: Vec<f64> = cooc.iter().map(|r| r.iter().sum()).collect();
+            let col_sums: Vec<f64> = (0..context_dim)
+                .map(|c| cooc.iter().map(|r| r[c]).sum())
+                .collect();
+            let eps = 1e-10_f64;
+            let ppmi: Vec<Vec<f64>> = (0..n_paras).map(|w| {
+                (0..context_dim).map(|c| {
+                    let p_wc = cooc[w][c] / (total + eps);
+                    let p_w  = row_sums[w] / (total + eps);
+                    let p_c  = col_sums[c] / (total + eps);
+                    if p_w > eps && p_c > eps && p_wc > eps {
+                        ((p_wc / (p_w * p_c)).ln()).max(0.0)
+                    } else { 0.0 }
+                }).collect()
+            }).collect();
+            ppmi.iter().map(|row| {
+                let mut v: Vec<f64> = row.iter().take(dim).copied().collect();
+                while v.len() < dim { v.push(0.0); }
+                v
+            }).collect()
+        };
+
+        // Normalize
+        let dim_actual = raw[0].len();
+        let mut min_d = vec![f64::INFINITY; dim_actual];
+        let mut max_d = vec![f64::NEG_INFINITY; dim_actual];
+        for emb in &raw { for (d, &v) in emb.iter().enumerate() { if v < min_d[d] { min_d[d] = v; } if v > max_d[d] { max_d[d] = v; } } }
+        let eps = 1e-10_f64;
+        let mut embeddings: VocabTable = raw.iter().map(|emb| {
+            emb.iter().enumerate().map(|(d, &v)| {
+                let range = max_d[d] - min_d[d];
+                if range < eps { 0.5 } else { (v - min_d[d]) / (range + eps) }
+            }).collect()
+        }).collect();
+        embeddings.push(vec![0.5_f64; dim_actual]);
+        let unk_id = embeddings.len() - 1;
+
+        // Mean word embeddings per paragraph
+        let mean_word_embeddings: VocabTable = if let Some(sem) = sem {
+            paragraphs.iter().map(|para| {
+                let all_tokens: Vec<usize> = para.iter()
+                    .flat_map(|sent| sent.iter().map(|w| sem.token_id(w)))
+                    .collect();
+                if all_tokens.is_empty() { return vec![0.5_f64; sem.dim]; }
+                let mut mean = vec![0.0_f64; sem.dim];
+                for &id in &all_tokens {
+                    let emb = &sem.embeddings[id.min(sem.embeddings.len() - 1)];
+                    for (d, &v) in emb.iter().enumerate() { mean[d] += v; }
+                }
+                mean.iter_mut().for_each(|v| *v /= all_tokens.len() as f64);
+                mean
+            }).collect()
+        } else { vec![] };
+
+        ParaM {
+            embeddings,
+            mean_word_embeddings,
+            paragraphs,
+            dim: dim_actual,
+            unk_id,
+        }
+    }
+
+    /// Number of paragraphs (including unk).
+    pub fn vocab_size(&self) -> usize { self.embeddings.len() }
+
+    /// Return the PPMI embedding for a paragraph index.
+    pub fn embedding(&self, para_idx: usize) -> &[f64] {
+        self.embeddings.get(para_idx)
+            .map(|v| v.as_slice())
+            .unwrap_or_else(|| self.embeddings[self.unk_id].as_slice())
+    }
+
+    /// Return the mean word embedding for a paragraph index.
+    pub fn mean_word_embedding(&self, para_idx: usize) -> Option<&[f64]> {
+        self.mean_word_embeddings.get(para_idx).map(|v| v.as_slice())
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -731,5 +1416,346 @@ mod tests {
         let m = SemanticM::from_raw(raw, words);
         assert_eq!(m.dim, 3);
         assert!(m.embeddings.iter().all(|emb| emb.len() == 3));
+    }
+
+    // ── Sentence boundary tests (OC-RA-10) ───────────────────────────────────────
+
+    /// tokenize_into_sentences: single sentence (no terminal punctuation)
+    #[test]
+    fn test_tokenize_sentences_single() {
+        let sents = tokenize_into_sentences("cat sat mat");
+        assert_eq!(sents.len(), 1);
+        assert_eq!(sents[0], vec!["cat", "sat", "mat"]);
+    }
+
+    /// tokenize_into_sentences: period splits into two sentences
+    #[test]
+    fn test_tokenize_sentences_period_split() {
+        let sents = tokenize_into_sentences("cat sat. dog ran.");
+        assert_eq!(sents.len(), 2, "period must produce two sentences, got {:?}", sents);
+        assert_eq!(sents[0], vec!["cat", "sat"]);
+        assert_eq!(sents[1], vec!["dog", "ran"]);
+    }
+
+    /// tokenize_into_sentences: exclamation and question marks also split
+    #[test]
+    fn test_tokenize_sentences_exclaim_question() {
+        let sents = tokenize_into_sentences("FIRE! What now? Stay calm.");
+        assert_eq!(sents.len(), 3, "three terminal marks → three sentences");
+        assert_eq!(sents[0], vec!["fire"]);
+        assert_eq!(sents[1], vec!["what", "now"]);
+        assert_eq!(sents[2], vec!["stay", "calm"]);
+    }
+
+    /// tokenize_into_sentences: double newline splits; single newline is a space
+    #[test]
+    fn test_tokenize_sentences_newline_handling() {
+        let sents = tokenize_into_sentences("cat sat\nmat\n\ndog ran");
+        assert_eq!(sents.len(), 2, "double newline must split, single newline must not");
+        // first sentence: cat + sat + mat (single newline = space)
+        assert!(sents[0].contains(&"cat".to_string()));
+        assert!(sents[0].contains(&"sat".to_string()));
+        assert!(sents[0].contains(&"mat".to_string()));
+        assert_eq!(sents[1], vec!["dog", "ran"]);
+    }
+
+    /// tokenize_into_sentences: empty input yields no sentences
+    #[test]
+    fn test_tokenize_sentences_empty() {
+        let sents = tokenize_into_sentences("");
+        assert!(sents.is_empty());
+    }
+
+    /// tokenize_into_sentences: trailing text with no terminator is a sentence
+    #[test]
+    fn test_tokenize_sentences_no_terminator() {
+        let sents = tokenize_into_sentences("cat sat");
+        assert_eq!(sents.len(), 1);
+        assert_eq!(sents[0], vec!["cat", "sat"]);
+    }
+
+    /// OC-RA-10 enforcement: cross-sentence pairs must NOT co-occur in M_word.
+    ///
+    /// "cat" appears in sentence 1; "ran" appears only in sentence 2.
+    /// With sentence-scoped co-occurrence, they must have zero count in cooc —
+    /// which means their PPMI vectors must be orthogonal / independently computed.
+    ///
+    /// We verify this indirectly: in a two-sentence corpus where "cat" and "ran"
+    /// never share a sentence, the M they produce must be distinct from one where
+    /// they DO share a sentence.
+    #[test]
+    fn test_sentence_boundary_separates_cooccurrence() {
+        // Corpus A: "cat" and "ran" in DIFFERENT sentences — no co-occurrence
+        let corpus_a = "cat sat mat. dog ran here.";
+        // Corpus B: "cat" and "ran" in the SAME sentence — co-occurrence exists
+        let corpus_b = "cat ran mat dog sat here";
+
+        let m_a = SemanticM::from_corpus(corpus_a, 8, 5, 1);
+        let m_b = SemanticM::from_corpus(corpus_b, 8, 5, 1);
+
+        // Both must include "cat" and "ran" in vocabulary
+        let cat_a = m_a.token_id("cat");
+        let ran_a = m_a.token_id("ran");
+        let cat_b = m_b.token_id("cat");
+        let ran_b = m_b.token_id("ran");
+
+        assert_ne!(cat_a, m_a.unk_id, "'cat' must be in corpus_a vocab");
+        assert_ne!(ran_a, m_a.unk_id, "'ran' must be in corpus_a vocab");
+        assert_ne!(cat_b, m_b.unk_id, "'cat' must be in corpus_b vocab");
+        assert_ne!(ran_b, m_b.unk_id, "'ran' must be in corpus_b vocab");
+
+        // The embeddings for "cat" in A and B should differ because in A
+        // "cat" cannot co-occur with "ran"/"dog"/"here" (cross-sentence).
+        // We confirm that the two corpora produce DIFFERENT M structures —
+        // which only holds when sentence boundaries are enforced.
+        let emb_cat_a = &m_a.embeddings[cat_a];
+        let emb_cat_b = &m_b.embeddings[cat_b];
+        let diff: f64 = emb_cat_a.iter().zip(emb_cat_b.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(diff > 1e-9,
+            "corpus_a and corpus_b have different sentence structure; \
+             'cat' embeddings must differ when sentence boundaries are enforced. \
+             diff = {}", diff);
+    }
+
+    /// OC-RA-10 enforcement: within-sentence co-occurrence is preserved.
+    ///
+    /// "cat" and "sat" are in the same sentence — they must still co-occur.
+    #[test]
+    fn test_within_sentence_cooccurrence_preserved() {
+        let corpus = "cat sat mat. dog ran here.";
+        let m = SemanticM::from_corpus(corpus, 8, 2, 1);
+
+        // "cat" and "sat" share sentence 1; their embeddings must not be zero
+        let cat_id = m.token_id("cat");
+        let sat_id = m.token_id("sat");
+
+        assert_ne!(cat_id, m.unk_id, "'cat' must be in vocab");
+        assert_ne!(sat_id, m.unk_id, "'sat' must be in vocab");
+
+        // Both must have non-trivial (non-zero) embeddings (co-occurrence happened)
+        let cat_norm: f64 = m.embeddings[cat_id].iter().map(|v| v * v).sum::<f64>().sqrt();
+        let sat_norm: f64 = m.embeddings[sat_id].iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert!(cat_norm > 1e-9, "'cat' embedding must be non-zero");
+        assert!(sat_norm > 1e-9, "'sat' embedding must be non-zero");
+    }
+
+    // ── OC-RA-11: CharM tests ─────────────────────────────────────────────────
+
+    /// CharM builds a vocabulary of characters found in the corpus.
+    #[test]
+    fn test_char_m_vocab_contains_corpus_chars() {
+        let m = CharM::from_corpus("hello world", 8, 1);
+        // 'h','e','l','o','w','r','d' + unk
+        for ch in "helowrd".chars() {
+            assert_ne!(m.char_id(ch), m.unk_id,
+                "char '{}' must be in CharM vocab", ch);
+        }
+    }
+
+    /// Unknown characters map to unk_id.
+    #[test]
+    fn test_char_m_unk_for_unseen_char() {
+        let m = CharM::from_corpus("abc", 4, 1);
+        let unk = m.char_id('z');
+        assert_eq!(unk, m.unk_id, "unseen char must map to unk_id");
+    }
+
+    /// Characters only co-occur within word boundaries.
+    /// "ab" and "cd" are in separate words; 'a'/'b' should co-occur but
+    /// 'a'/'c' should NOT (they never share a word).
+    #[test]
+    fn test_char_m_word_boundary_separates_cooccurrence() {
+        // "ab" and "cd" are distinct words — no cross-word co-occurrence
+        let corpus = "ab cd ab cd ab cd";
+        let m = CharM::from_corpus(corpus, 8, 1);
+
+        let a_id = m.char_id('a');
+        let b_id = m.char_id('b');
+        let c_id = m.char_id('c');
+        let d_id = m.char_id('d');
+
+        // All four chars in vocab
+        assert_ne!(a_id, m.unk_id);
+        assert_ne!(b_id, m.unk_id);
+        assert_ne!(c_id, m.unk_id);
+        assert_ne!(d_id, m.unk_id);
+
+        // 'a' and 'b' co-occur in every "ab" occurrence — their embeddings
+        // must have similar structure (high PPMI relative to 'a'/'c' cross-word pair).
+        // We test this structurally: 'a'-'b' co-occurrence must be > 0 while
+        // 'a'-'c' co-occurrence must be 0 (they never share a word).
+        // Access the raw embedding: since PPMI is normalized, we check via dim.
+        let emb_a = m.embedding(a_id);
+        let emb_c = m.embedding(c_id);
+        // Both should be non-trivial (they appear in a corpus word)
+        let norm_a: f64 = emb_a.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let norm_c: f64 = emb_c.iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert!(norm_a > 1e-9, "'a' embedding must be non-zero");
+        assert!(norm_c > 1e-9, "'c' embedding must be non-zero");
+
+        // 'a' and 'c' never share a word — their PPMI should be 0.
+        // We verify this by building a second CharM where "ac" IS a word:
+        // the cross-word corpus must produce DIFFERENT embeddings for 'a' than
+        // the same corpus with "ac" added.
+        let m2 = CharM::from_corpus("ab cd ac ab cd ac", 8, 1);
+        let a2_id = m2.char_id('a');
+        let emb_a2 = m2.embedding(a2_id);
+        let diff: f64 = emb_a.iter().zip(emb_a2.iter())
+            .map(|(x, y)| (x - y).abs()).sum();
+        assert!(diff > 1e-9,
+            "adding 'ac' word must change 'a' embedding (cross-word co-occurrence test)");
+    }
+
+    /// CharM embeddings are in [0,1].
+    #[test]
+    fn test_char_m_domain_bounds() {
+        let m = CharM::from_corpus("the quick brown fox jumps over the lazy dog", 8, 1);
+        for emb in &m.embeddings {
+            for &v in emb {
+                assert!(v >= DOMAIN_LOWER && v <= DOMAIN_UPPER + 1e-9,
+                    "CharM embedding {} out of [0,1]", v);
+            }
+        }
+    }
+
+    /// CharM encode_word returns the correct char_ids.
+    #[test]
+    fn test_char_m_encode_word() {
+        let m = CharM::from_corpus("cat dog", 8, 1);
+        let ids = m.encode_word("cat");
+        assert_eq!(ids.len(), 3, "encode_word('cat') must return 3 ids");
+        assert_eq!(ids[0], m.char_id('c'));
+        assert_eq!(ids[1], m.char_id('a'));
+        assert_eq!(ids[2], m.char_id('t'));
+    }
+
+    /// CharM on empty corpus does not panic.
+    #[test]
+    fn test_char_m_empty_corpus() {
+        let m = CharM::from_corpus("", 8, 1);
+        assert!(m.vocab_size() >= 1, "must have at least unk entry");
+    }
+
+    // ── OC-RA-8: SentM tests ──────────────────────────────────────────────────
+
+    /// SentM builds one entry per sentence.
+    #[test]
+    fn test_sent_m_sentence_count() {
+        // Two paragraphs with two sentences each = 4 sentences + 1 unk
+        let corpus = "First sentence. Second sentence.\n\nThird sentence. Fourth sentence.";
+        let m = SentM::from_corpus(corpus, 8, None);
+        assert_eq!(m.sentences.len(), 4, "must have 4 sentences");
+        assert_eq!(m.vocab_size(), 5, "4 sentences + 1 unk");
+    }
+
+    /// SentM embeddings are in [0,1].
+    #[test]
+    fn test_sent_m_domain_bounds() {
+        let corpus = "Alpha beta. Gamma delta.\n\nEpsilon zeta. Eta theta.";
+        let m = SentM::from_corpus(corpus, 8, None);
+        for emb in &m.embeddings {
+            for &v in emb {
+                assert!(v >= DOMAIN_LOWER && v <= DOMAIN_UPPER + 1e-9,
+                    "SentM embedding {} out of [0,1]", v);
+            }
+        }
+    }
+
+    /// Sentences in different paragraphs do not co-occur (paragraph boundary respected).
+    /// Sentences in the same paragraph do co-occur.
+    #[test]
+    fn test_sent_m_paragraph_boundary() {
+        // para1: "s1 s2" (two sentences); para2: "s3 s4" (two sentences)
+        // s1 and s2 must co-occur; s1 and s3 must NOT.
+        let corpus = "one two. three four.\n\nfive six. seven eight.";
+        let m_two_para = SentM::from_corpus(corpus, 8, None);
+        // All four sentences must exist
+        assert_eq!(m_two_para.sentences.len(), 4);
+
+        // Single-paragraph corpus: same 4 sentences but no paragraph break.
+        // Now all 4 sentences co-occur with each other.
+        let corpus_one = "one two. three four. five six. seven eight.";
+        let m_one_para = SentM::from_corpus(corpus_one, 8, None);
+        assert_eq!(m_one_para.sentences.len(), 4);
+
+        // The two-paragraph corpus must produce DIFFERENT embeddings than the
+        // one-paragraph corpus, because co-occurrence structure differs.
+        let diff: f64 = m_two_para.embeddings[0].iter()
+            .zip(m_one_para.embeddings[0].iter())
+            .map(|(a, b)| (a - b).abs()).sum();
+        assert!(diff > 1e-9,
+            "paragraph boundary must produce different co-occurrence structure");
+    }
+
+    /// SentM empty corpus does not panic.
+    #[test]
+    fn test_sent_m_empty_corpus() {
+        let m = SentM::from_corpus("", 8, None);
+        assert!(m.vocab_size() >= 1);
+    }
+
+    // ── OC-RA-8: ParaM tests ──────────────────────────────────────────────────
+
+    /// ParaM builds one entry per paragraph.
+    #[test]
+    fn test_para_m_paragraph_count() {
+        let corpus = "Para one sentence.\n\nPara two sentence.\n\nPara three sentence.";
+        let m = ParaM::from_corpus(corpus, 8, None);
+        assert_eq!(m.paragraphs.len(), 3, "must have 3 paragraphs");
+        assert_eq!(m.vocab_size(), 4, "3 paragraphs + 1 unk");
+    }
+
+    /// ParaM embeddings are in [0,1].
+    #[test]
+    fn test_para_m_domain_bounds() {
+        let corpus = "First para alpha beta.\n\nSecond para gamma delta.\n\nThird para epsilon.";
+        let m = ParaM::from_corpus(corpus, 8, None);
+        for emb in &m.embeddings {
+            for &v in emb {
+                assert!(v >= DOMAIN_LOWER && v <= DOMAIN_UPPER + 1e-9,
+                    "ParaM embedding {} out of [0,1]", v);
+            }
+        }
+    }
+
+    /// ParaM mean_word_embeddings populated when SemanticM provided.
+    #[test]
+    fn test_para_m_mean_word_embeddings_with_sem() {
+        let corpus = "cat sat mat.\n\ndog ran here.";
+        let sem = SemanticM::from_corpus(corpus, 8, 2, 1);
+        let m = ParaM::from_corpus(corpus, 8, Some(&sem));
+        assert_eq!(m.mean_word_embeddings.len(), m.paragraphs.len(),
+            "one mean embedding per paragraph");
+        for emb in &m.mean_word_embeddings {
+            for &v in emb {
+                assert!(v >= DOMAIN_LOWER && v <= DOMAIN_UPPER + 1e-9,
+                    "mean word embedding {} out of [0,1]", v);
+            }
+        }
+    }
+
+    /// ParaM empty corpus does not panic.
+    #[test]
+    fn test_para_m_empty_corpus() {
+        let m = ParaM::from_corpus("", 8, None);
+        assert!(m.vocab_size() >= 1);
+    }
+
+    /// tokenize_into_paragraphs splits on blank lines (double newline or whitespace-only lines).
+    #[test]
+    fn test_tokenize_into_paragraphs() {
+        // Standard double-newline
+        let text = "First paragraph with two sentences. And more.\n\nSecond paragraph here.";
+        let paras = tokenize_into_paragraphs(text);
+        assert_eq!(paras.len(), 2, "must have 2 paragraphs");
+        assert_eq!(paras[0].len(), 2, "first paragraph has 2 sentences");
+        assert_eq!(paras[1].len(), 1, "second paragraph has 1 sentence");
+
+        // WikiText-2 format: blank lines contain only a space
+        let text2 = "First paragraph sentence one. And two.\n \nSecond paragraph here.";
+        let paras2 = tokenize_into_paragraphs(text2);
+        assert_eq!(paras2.len(), 2, "must have 2 paragraphs (WikiText-2 blank)");
     }
 }

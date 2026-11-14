@@ -1,7 +1,71 @@
 # ABR Relational Attention -- M Declaration V5.0
 **Metatron Dynamics, Inc. -- 2026-11-13**
 **Kernel: V9 (kernel_reference.md 2026-10-24)**
-**Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared**
+**Revision: V3.0 ρ and R replaced with canonical V9 forms; ρ_base and χ₀ M-declared; V5.0 physical basis, relational evolution direction, multi-scale M**
+
+---
+
+## Physical Basis of Observable Information
+
+Origin declaration, 2026-11-13.
+
+Observable information is relational, bounded, and described by the interactions
+of energy, connection, and degrees of freedom. This is a statement from
+mathematics and physics — not philosophy — and it appears to hold as the basis
+of all observable information.
+
+**Relational.** In measurement theory, all observable quantities are defined
+relative to a reference frame. Absolute position, absolute energy, absolute
+meaning — none are measurable; only their differences and relations are.
+A quantity that exists independently of all relations to other quantities is
+not in principle observable and therefore not in D. Relationality is not
+imposed on observables; it is what makes something an observable.
+
+**Bounded.** Physical systems have bounded state spaces. The information
+content of any finite region is finite. Unbounded quantities are unphysical:
+they indicate either that an approximation has broken down or that a quantity
+has been defined outside its valid domain. D := {x in R^n | n < inf,
+|x[i]| < inf for all i} is a physics requirement, not a modeling convenience.
+
+**Energy, connection, and degrees of freedom** are the three fundamental
+descriptors of any physical system:
+
+- **Degrees of freedom** — the dimensionality of the state space; what can
+  vary at each scale
+- **Connection (topology)** — which parts of the system interact with which;
+  the structure of admissible relations
+- **Energy** — the capacity for change; what drives evolution of the system's
+  state
+
+Any physical system is fully described by these three. The partition function
+in statistical mechanics sums over degrees of freedom, weighted by energy,
+through the interaction topology. The relational framework does the same: the
+DOF hierarchy states what can vary at each scale, the connection hierarchy
+states which loci interact and at what scope, and ε[e] states how much energy
+each interaction carries.
+
+**Generality.** This framework is not a theory of language. It is a
+description of observable information — applied to language because language
+is a physical observable system. It applies to any physical observable system
+for the same reason: all observable information has this structure. Language
+instantiates it particularly clearly because its relational structure is
+explicit, graded, and grounded in physical phonemic origin.
+
+**Contrast with approaches that begin without meaning.** A system that begins
+with tokens as abstract symbols and applies mathematical operations to
+approximate meaning is operating on the statistical shadow of relational
+structure — not on the structure itself. It works to the extent that the
+mathematical operations happen to approximate the relational primitives through
+training. The relational approach declares the structure directly from the
+observable; the approximation approach discovers it statistically. The error
+modes differ: relational errors are declaration gaps (identifiable and
+closeable); approximation errors are statistical (not in principle statable
+as conditions).
+
+**Epistemic status.** This is an empirical observation, not an a priori proof:
+wherever observable information has been examined, it has relational structure,
+bounded quantities, and the three primitives. The framework is built on that
+observation. A domain where it does not hold would require revision.
 
 ---
 
@@ -9,7 +73,8 @@
 
 D := { x in R^n | n < inf, |x[i]| < inf for all i }
 
-All quantities are bounded members of D.
+All quantities are bounded members of D. The boundedness of D follows from
+the physical basis above: observable quantities are finite.
 
 ---
 
@@ -691,6 +756,7 @@ The OOV rate is a property of the small M corpus, not a protocol violation.
 
 | Item | V4.6 | V5.0 |
 |------|-------|-------|
+| Physical basis of observable information | Not declared | Added (Origin declaration, 2026-11-13): observable information is relational, bounded, and described by energy, connection, and degrees of freedom — a physics/mathematics statement, not philosophy. Framework is a description of observable information generally, applied to language. Contrast with approximation-based approaches (transformers) stated: relational errors are declaration gaps; approximation errors are statistical. |
 | Text as a complete relational system | Not declared | Added (Origin declaration, 2026-11-13): text contains the four relational primitives (relation, DOF, energy, connection) as observables — not imposed from outside. Consequence: operators are descriptions of what text already does; M at each scale must faithfully encode what that scale contains. |
 | Relational evolution direction | Partial declaration: coherence progression, reverse inadmissible | **Superseded and completed** (Origin declaration, 2026-11-13): direction = left-to-right at all scales; invariant across connection hierarchy; PPMI symmetry is a property of M, not of edge direction; bidirectionality explicitly inadmissible; src=earlier, tgt=later at every scale. |
 | OC-RA-4 | OPEN — bidirectional direction not declared | **CLOSED** (Origin declaration, 2026-11-13): bidirectionality inadmissible; edge direction fully declared. |

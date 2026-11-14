@@ -666,7 +666,7 @@ Inference:    O(n·k) -- k = mean admitted neighbourhood size.
 
 - OC-RA-1: theta_min calibration (Phase 1) -- **CLOSED** (eta_calibration sweep: θ_min=0.05 discriminative at η=0.1 with Zipf vocabulary; admitted%=92.2% at θ=0.05 after A+B; admitted%=0% below θ=0.05 → threshold admits only recurring pairs; OC-RA-3 generalisation confirmed on WikiText-2; declared finding: θ_min=0.05 admissible; 2026-11-13)
 - OC-RA-2: eta calibration (Phase 1) -- **CLOSED** (eta_calibration sweep: η=0.10 admissible at θ_min=0.05; one exposure admits high-ρₙ pairs; recurrence depth discriminated by θ_min; admissible range η∈[0.05,0.20]; OC-RA-3 generalisation confirmed on WikiText-2; declared finding: η=0.10 admissible; 2026-11-13)
-- OC-RA-3: generalisation -- held-out validation (Phase 1) -- **CLOSED** (OC-RA-3 benchmark, 2026-11-12; see below)
+- OC-RA-3: generalisation -- held-out validation (Phase 1) -- **OPEN (re-opened 2026-11-13)** (Runs 1 and 2 used a direction-violating protocol; corrected benchmark required; see Protocol Correction note below)
 - OC-RA-4: bidirectional direction -- **CLOSED** (Origin declaration, 2026-11-13; bidirectionality inadmissible; edge direction = relational evolution direction; src=earlier, tgt=later; invariant at all scales)
 - OC-RA-5: window-restricted O(n*k) accumulation (Phase 1) -- **CLOSED** (StreamingField::arrive evaluates each arriving token against at most COHERENCE_WINDOW=64 predecessors; window_start = j.saturating_sub(window); accumulation is O(n·k) not O(n²); declared in streaming.rs header; 2026-11-13)
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
@@ -773,6 +773,22 @@ Each closure makes the system more complete according to the relational mathemat
 improved ABR test perplexity by 5.4 points (237.4 → 232.0). This is the expected
 direction: excluding spurious cross-sentence co-occurrences tightens the sentence-local
 relational geometry in M, which the operators can then use more accurately.
+
+**Protocol correction (2026-11-13 — verifier finding):** The Run 1 and Run 2 test
+evaluations used a direction-violating protocol: `arrive_chunked(test_ids)` accumulated
+all test bindings into the EdgeStore before collecting test R-fields. This meant
+`inference_at(t)` read bindings informed by test tokens after position t.
+
+Correction applied: test R-field collection now uses a strictly causal interleaved
+arrive → inference loop. For each position t, `arrive(test_ids[t])` is called, then
+`inference_at(local_pos)` reads the EdgeStore containing only train bindings plus test
+bindings from tokens 0..t. No future test information reaches the prediction at t.
+
+The Run 1 and Run 2 numbers (pplx 237.4, 232.0) were produced by the uncorrected
+protocol and should be treated as provisional. A corrected Run 3 benchmark is required
+to close OC-RA-3 against the monodirectional protocol. The generalisation criterion
+(ABR test pplx < ABR train pplx) remains the stated claim; the corrected benchmark
+will determine whether it still holds under strict causal evaluation.
 
 **Closed-world M declaration:** PPMI vocabulary built from train text only. Test tokens
 outside train vocab receive unk treatment. This is correct protocol (no test leakage into M).

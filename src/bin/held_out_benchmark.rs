@@ -40,7 +40,7 @@
 //   Or without args: looks for /tmp/wikitext2/{train,test}.txt by default.
 
 use abr_relational_attention::{
-    declaration::{ETA, THETA_MIN, COHERENCE_WINDOW},
+    declaration::{ETA, THETA_MIN, COHERENCE_WINDOW, Locus},
     semantic::SemanticM,
     streaming::StreamingField,
     output_projection::{OutputProjection, AdamState, train_epoch_adam, evaluate},
@@ -246,18 +246,33 @@ fn main() {
     // ── 5. Evaluate on held-out test set ─────────────────────────────────────
     println!("  [5/5] Evaluating on held-out test set ({} tokens) ...", n_test);
 
-    // Stream test tokens through field (field accumulates from train state).
-    // Declared: online accumulation continues during test; W_O frozen.
-    // This is not replay — test tokens are new, unseen exposures.
-    // Chunked for same MAX_SEQUENCE_LENGTH reason as train.
-    arrive_chunked(&mut field, &test_ids, &vocab_table, CHUNK_SIZE);
+    // Online causal test evaluation — monodirectional.
+    //
+    // DECLARATION: prediction at position t must use only bindings formed from
+    // tokens 0..t.  The earlier two-phase pattern (arrive_chunked ALL test tokens,
+    // then re-stream for inference) violated this: inference_at(t) read an EdgeStore
+    // already informed by test tokens after t.
+    //
+    // Fix: interleave arrive → inference for each token in order.
+    // After arrive(test_ids[t]), EdgeStore contains only:
+    //   - train bindings (settled before this loop), and
+    //   - test bindings from tokens 0..t.
+    // inference_at(local_pos) then reads that causally-bounded EdgeStore.
+    //
+    // reset_stream() between chunks clears the positional stream (declared
+    // acceptable loss: COHERENCE_WINDOW context lost at chunk boundaries).
+    // The EdgeStore is NOT cleared — train + accumulated test bindings persist.
+    field.reset_stream(); // keep train EdgeStore; clear positional stream
 
-    // Re-stream test for inference (same positional rebuild pattern as train).
     let mut test_reps: Vec<Vec<f64>> = Vec::with_capacity(n_test_pairs);
     let mut n_novel_test = 0_usize;
     for chunk_ids in test_ids[..n_test_pairs].chunks(CHUNK_SIZE) {
-        field.arrive_sequence(chunk_ids, &vocab_table);
-        for local_pos in 0..chunk_ids.len() {
+        for (local_pos, &token_id) in chunk_ids.iter().enumerate() {
+            // Arrive this token: EdgeStore gains bindings from tokens 0..local_pos within
+            // this chunk (plus all prior chunks and train).  No future token influences.
+            let locus = Locus::new(field.frontier(), token_id);
+            field.arrive(locus, &vocab_table);
+            // Inference at this position: reads the causally-bounded EdgeStore.
             let (r, n_edges) = field.inference_at(local_pos, &vocab_table, THETA_MIN);
             if n_edges == 0 { n_novel_test += 1; }
             test_reps.push(r);

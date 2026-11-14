@@ -620,8 +620,8 @@ establish held-out generalization.
 
 | Parameter   | Symbol      | Value   | M Declaration                                                                                              |
 |-------------|-------------|---------|-------------------------------------------------------------------------------------------------------------|
-| Learning    | eta         | 0.1     | OC-RA-2 partially closed                                                                                    |
-| Threshold   | theta_min   | 0.05    | OC-RA-1 partially closed                                                                                    |
+| Learning    | eta         | 0.1     | OC-RA-2 **CLOSED** (2026-11-13): η=0.10 admissible at θ_min=0.05; Zipf sweep + WikiText-2 generalisation confirmed |
+| Threshold   | theta_min   | 0.05    | OC-RA-1 **CLOSED** (2026-11-13): θ_min=0.05 discriminative at η=0.10; admits recurring pairs, excludes sporadic; OC-RA-3 confirmed |
 | Ceiling     | ρ_base      | 1.0     | Language domain. V9 general value: 0.5. Declared 1.0: GloVe-50d and PPMI-derived (SemanticM) embeddings are min-max normalized to [0,1]^dim; chi = max\|A[e]\| ∈ [0,1]. With χ₀=1: ρ_base=0.5 → ρ_max=0.25; ρ_base=1.0 → ρ_max=0.50. Declaring 1.0 uses the available chi range proportionally (doubles the ceiling). No claim that 0.25 is insufficient. Reason recorded per V9 §9. |
 | Reference   | χ₀          | 1       | Language domain. V9 general value: 1 unit of χ. Declared as 1 unit of normalized embedding distance ([0,1]^dim space; applies to GloVe-50d and PPMI-derived SemanticM). χ is dimensionless in this normalized space; χ₀=1 is one unit of that space. |
 | Stability   | eps         | 1e-8    | Implementation tolerance; not a system property. Retained in rho_acc update only. |
@@ -662,8 +662,8 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 
 ## Open Conditions
 
-- OC-RA-1: theta_min calibration (Phase 1)
-- OC-RA-2: eta calibration (Phase 1)
+- OC-RA-1: theta_min calibration (Phase 1) -- **CLOSED** (eta_calibration sweep: θ_min=0.05 discriminative at η=0.1 with Zipf vocabulary; admitted%=92.2% at θ=0.05 after A+B; admitted%=0% below θ=0.05 → threshold admits only recurring pairs; OC-RA-3 generalisation confirmed on WikiText-2; declared finding: θ_min=0.05 admissible; 2026-11-13)
+- OC-RA-2: eta calibration (Phase 1) -- **CLOSED** (eta_calibration sweep: η=0.10 admissible at θ_min=0.05; one exposure admits high-ρₙ pairs; recurrence depth discriminated by θ_min; admissible range η∈[0.05,0.20]; OC-RA-3 generalisation confirmed on WikiText-2; declared finding: η=0.10 admissible; 2026-11-13)
 - OC-RA-3: generalisation -- held-out validation (Phase 1) -- **CLOSED** (OC-RA-3 benchmark, 2026-11-12; see below)
 - OC-RA-4: bidirectional direction -- **CLOSED** (Origin declaration, 2026-11-13; bidirectionality inadmissible; edge direction = relational evolution direction; src=earlier, tgt=later; invariant at all scales)
 - OC-RA-5: window-restricted O(n*k) accumulation (Phase 1)

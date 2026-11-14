@@ -668,7 +668,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-9: ι[v] / ε[e] through emphasis markers -- **CLOSED** (implemented 2026-11-12; typographic signals only; italics/bold/emotional lexicon remain continuation scope)
 - OC-RA-10: M_word sentence-scope enforcement -- **CLOSED** (tokenize_into_sentences added; from_corpus co-occurrence loop now sentence-scoped; 132 tests pass; 2026-11-13)
 - OC-RA-11: M_char not yet built -- OPEN (character-level relational structure within words undeclared through M; natural upstream source abr-u-tokenizer; declared gap 2026-11-13)
-- OC-RA-12: ε[e] not integrated into operator path -- OPEN (energy is a primitive of the relational system; ε[e] weighting of ρ_acc accumulation is structurally required; ι stored on SemanticM but operators do not use it; declared gap 2026-11-13)
+- OC-RA-12: ε[e] not integrated into operator path -- **CLOSED** (accumulate_energy_weighted added to AccumulatedBinding; ρ_acc ← ρ_acc + η·(1+ε[e])·ρₙ·(1-ρ_acc); EdgeStore::update_with_energy wires it into StreamingField::arrive; SemanticM.iota passed to benchmark field via set_iota; ε=0 ambient equals base rate; 137 tests pass; 2026-11-13)
 
 ---
 
@@ -786,8 +786,8 @@ corpus reduces OOV rate and increases EdgeStore density — both improve the dec
 | Window = scope boundary principle | window=5 declared as "approximation of sentence-proximity scope" | **Superseded**: window is not a free parameter; it is the connection scope of its scale; the scope boundary overrides the count. M_word should admit only within-sentence co-occurrences. |
 | OC-RA-10 | Not listed | **CLOSED** (2026-11-13): tokenize_into_sentences added; from_corpus co-occurrence loop now sentence-scoped; 8 new tests; 132 total pass. |
 | OC-RA-11 | Not listed | OPEN: M_char not yet built; character-level relational structure undeclared through M. |
-| OC-RA-12 | Not listed | OPEN: ε[e] not integrated into operator path; energy is a primitive; ε[e] weighting of ρ_acc is structurally required. |
-| Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. Multi-scale M and direction declarations strengthen traceability; OC-RA-11/12 record where the trace is currently incomplete (OC-RA-10 now closed). |
+| OC-RA-12 | Not listed | **CLOSED** (2026-11-13): ρ_acc ← ρ_acc + η·(1+ε[e])·ρₙ·(1-ρ_acc); accumulate_energy_weighted + update_with_energy implemented; iota wired into benchmark field; 137 tests pass. |
+| Verifier criterion | "every quantity traceable to declared observables through declared operators" | Unchanged. Multi-scale M and direction declarations strengthen traceability; OC-RA-11 records where the trace is currently incomplete (OC-RA-10, OC-RA-12 now closed). |
 
 ---
 
@@ -875,9 +875,9 @@ corpus reduces OOV rate and increases EdgeStore density — both improve the dec
 Can every mathematical operation be traced continuously back to declared
 observables through declared operators? Every quantity in this repository
 satisfies this criterion under Declaration V5.0 and Kernel V9, subject to the
-open conditions OC-RA-11 and OC-RA-12 where the trace is currently
-incomplete (M_char, ε[e] integration). OC-RA-10 (M_word sentence scope)
-is now closed.
+open condition OC-RA-11 where the trace is currently incomplete (M_char).
+OC-RA-10 (M_word sentence scope) and OC-RA-12 (ε[e] integration) are
+now closed.
 
 Kernel V9 scope: this repository is application construction scope
 (kernel_reference.md §4). V9 provenance machinery (IRRS, RPPI,

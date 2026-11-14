@@ -655,8 +655,10 @@ form (chi-based, computed from A before B).
 
 ## Complexity
 
-Accumulation: O(n^2) Phase 0 -- all causal pairs evaluated (OC-RA-5).
-Inference:    O(n*k) -- k = mean admitted neighbourhood size.
+Accumulation: O(n·k) -- k = COHERENCE_WINDOW = 64 (OC-RA-5 CLOSED).
+  arrive() evaluates each arriving token against at most k predecessors.
+  No O(n²) pair evaluation — window_start = j.saturating_sub(window).
+Inference:    O(n·k) -- k = mean admitted neighbourhood size.
 
 ---
 
@@ -666,7 +668,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 - OC-RA-2: eta calibration (Phase 1) -- **CLOSED** (eta_calibration sweep: η=0.10 admissible at θ_min=0.05; one exposure admits high-ρₙ pairs; recurrence depth discriminated by θ_min; admissible range η∈[0.05,0.20]; OC-RA-3 generalisation confirmed on WikiText-2; declared finding: η=0.10 admissible; 2026-11-13)
 - OC-RA-3: generalisation -- held-out validation (Phase 1) -- **CLOSED** (OC-RA-3 benchmark, 2026-11-12; see below)
 - OC-RA-4: bidirectional direction -- **CLOSED** (Origin declaration, 2026-11-13; bidirectionality inadmissible; edge direction = relational evolution direction; src=earlier, tgt=later; invariant at all scales)
-- OC-RA-5: window-restricted O(n*k) accumulation (Phase 1)
+- OC-RA-5: window-restricted O(n*k) accumulation (Phase 1) -- **CLOSED** (StreamingField::arrive evaluates each arriving token against at most COHERENCE_WINDOW=64 predecessors; window_start = j.saturating_sub(window); accumulation is O(n·k) not O(n²); declared in streaming.rs header; 2026-11-13)
 - OC-RA-6: χ max-selection rule -- CLOSED (Origin declaration, 2026-11-11)
 - OC-RA-7: saturating form χ/(χ₀+χ) -- **CLOSED** (Origin declaration, 2026-11-12)
 - OC-RA-8: higher-level connection scopes (sentence, paragraph, volume) -- **CLOSED** (SentM and ParaM implemented; loci=sentences/paragraphs; window=paragraph/volume boundary; PPMI normalized; 9 new tests; 152 total pass; 2026-11-13)

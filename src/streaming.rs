@@ -300,12 +300,29 @@ impl StreamingField {
 
         // Aggregate at target position (last in window = position).
         //
-        // DOMAIN MAINTENANCE: compute the MEAN R-field over admitted edges at
-        // the target position, not the sum.  Each R-vector component traces to
-        // M ∈ [0,1]^dim through declared operators, so the mean is bounded.
-        // A sum would be O(k) and violate D = [0,1]^dim as k grows.
-        // Analogous to softmax attention: output = Σ attn_weight · V, where
-        // Σ attn_weight = 1 (normalized).  Here: output = (1/k) Σ R[i→pos].
+        // AGGREGATION RULE: compute the MEAN R-field over admitted edges at
+        // the target position, not the sum.
+        //
+        // DOMAIN CORRECTION (2026-11-14 — trace_demo.rs single-passage verification):
+        // The original comment here claimed "the mean is bounded [to [0,1]^dim]
+        // because each R-vector component traces to M ∈ [0,1]^dim."  This is
+        // INCORRECT.  Demonstrated counter-example from trace_demo.rs:
+        //   R[pos0→pos1 ("when","we")][6] = +1.652106   (> 1)
+        //   mean-R at pos=4 component [6] = -0.259380   (< 0)
+        //
+        // Correct claim:
+        //   M ∈ [0,1]^dim — the measurement domain.
+        //   A[e] = M[src] - M[tgt] ∈ [-1,1]^dim.
+        //   B[e] = A[e] + Σ_succ A[f] ∈ ℝ^dim (sum of bounded vectors).
+        //   R[e] = B[e] + ρ[src]·(Σ_succ B − Σ_pred B) ∈ ℝ^dim.
+        //   mean R ∈ ℝ^dim — signed, finite, but NOT bounded to [0,1]^dim.
+        //
+        // The mean is O(1) in k (not O(k) as a sum would be), which is the
+        // correct stability argument.  It does not bound the domain to [0,1].
+        // The domain D = {x ∈ ℝⁿ | n < ∞, |x[i]| < ∞ ∀i} bounds finiteness;
+        // derived operators operate in ℝ^dim.  Clipping or normalisation is
+        // NOT applied; signed R values must be preserved as declared.
+        // Here: output = (1/k) Σ R[i→pos], output ∈ ℝ^dim.
         let mut output = vec![0.0_f64; dim];
         let mut n_at_target = 0_usize;
         for (ei, &(_, tp)) in edges.iter().enumerate() {

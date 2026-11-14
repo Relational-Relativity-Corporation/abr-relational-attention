@@ -994,6 +994,56 @@ corpus reduces OOV rate and increases EdgeStore density — both improve the dec
 
 ---
 
+## R-Field Domain Correction (2026-11-14)
+
+**Source:** `src/bin/trace_demo.rs` single-passage executable trace.
+Darwin (1859), Ch. II, passage "When we look to the" (5 tokens, single pass).
+Implementation revision: commit `0f2f3e3`, branch `declaration-v5-0`.
+
+**Stale claim corrected:** `src/streaming.rs` lines 302–306 (pre-correction)
+contained:
+> "Each R-vector component traces to M ∈ [0,1]^dim through declared operators,
+>  so the mean is bounded."
+
+This implied mean R ∈ [0,1]^dim, which is incorrect.
+
+**Demonstrated counter-examples (from trace_demo.rs output):**
+
+| quantity | value | domain |
+|----------|-------|--------|
+| R[pos0→pos1("when","we")][6] at pos=1 | +1.504328 | > 1 |
+| R[pos0→pos1("when","we")][6] at pos=4 | +1.652106 | > 1 |
+| R[pos0→pos3("when","to")][5] at pos=4 | +1.172878 | > 1 |
+| mean-R[pos=4][6] | −0.259380 | < 0 |
+| R[pos1→pos2("we","look")][5] at pos=4 | −0.672878 | < 0 |
+
+**Correct domain chain:**
+
+```
+M[token_id]      ∈  [0,1]^dim           (declared measurement domain)
+A[e]             ∈  [−1,1]^dim          A[e] = M[src] − M[tgt]
+B[e]             ∈  ℝ^dim               B[e] = A[e] + Σ_succ A[f]
+R[e]             ∈  ℝ^dim               R[e] = B[e] + ρ[src]·(Σ_succ B − Σ_pred B)
+mean R at pos    ∈  ℝ^dim               output = (1/k) Σ R[i→pos]
+```
+
+**Correct stability argument:** The mean is O(1) in k (not O(k) as a sum would
+be). This is the correct reason to prefer mean over sum. It is NOT an argument
+that the output is bounded to [0,1]^dim.
+
+**Domain D:** D = {x ∈ ℝⁿ | n < ∞, |x[i]| < ∞ ∀i} bounds finiteness, not
+[0,1] confinement. R ∈ D is the correct claim. Derived operators operate in
+ℝ^dim. M ∈ [0,1]^dim is the measurement subdomain.
+
+**What is NOT changed:** No clipping, normalisation, or bounding is applied
+to R values. Signed R values are preserved as declared. The streaming.rs code
+is correct; only the misleading comment has been corrected.
+
+**streaming.rs correction:** Lines 302–306 comment rewritten on 2026-11-14.
+See the corrected comment in `src/streaming.rs` for the full replacement text.
+
+---
+
 ## Verifier Criterion
 
 Can every mathematical operation be traced continuously back to declared

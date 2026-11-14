@@ -1,7 +1,7 @@
 // layer_stack.rs — Metatron Dynamics, Inc.
 // ABR Relational Attention — Layer Stack V1.0
 //
-// Grounding: declaration.rs V2.0, attention_layer.rs V1.0, operators.rs V7
+// Grounding: declaration.rs V5.0, attention_layer.rs V1.0, operators.rs V7 (Kernel V9)
 //
 // ARCHITECTURAL PRINCIPLE:
 //   The ABR kernel produces a relational field R ∈ ℝ^dim at each token position.

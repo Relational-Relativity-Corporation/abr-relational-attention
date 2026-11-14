@@ -1,7 +1,7 @@
 // streaming.rs — Metatron Dynamics, Inc.
 // ABR Relational Attention — Streaming Field V1.0
 //
-// Grounding: declaration.rs V2.0, accumulation.rs V2.0, operators.rs V7
+// Grounding: declaration.rs V5.0, accumulation.rs V2.0, operators.rs V7 (Kernel V9)
 // Status: Phase 1 — OC-RA-5 (window-restricted accumulation) CLOSED
 //
 // The relational field is continuous. Tokens enter the field once.

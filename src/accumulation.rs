@@ -1,7 +1,7 @@
 // accumulation.rs — Metatron Dynamics, Inc.
 // ABR Relational Attention — Accumulation Rule V2.0
 //
-// Grounding: operators.rs V7, DECLARATION.md V2.0 (2026-08-21)
+// Grounding: operators.rs V7 (Kernel V9), DECLARATION.md V5.0 (2026-11-13)
 //
 // V2.0 changes (Verifier findings V4, V5):
 //   V5 closed: EdgeStore keyed by token-identity pair (token_id_src, token_id_tgt)

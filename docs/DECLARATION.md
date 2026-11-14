@@ -548,6 +548,21 @@ Declared training protocol:
 - Loss: cross-entropy over vocabulary
 - Input: R-field vector at each position (last layer, dim=50)
 - Target: next-token identity
+- Initialization: Xavier/Glorot uniform (Glorot & Bengio, 2010); scale = sqrt(6/(fan_in+fan_out))
+
+**Legacy math declaration — W_O initialization:**
+Xavier/Glorot uniform initialization is used in `OutputProjection::new_random()` to set the
+initial W_O weights. This is a legacy ML heuristic not sourced in the ABR kernel. It is
+admitted as the W_O initialization method for the following reasons:
+  (a) W_O is already declared as the sole gradient-descent-updated parameter — its initialization
+      is properly a property of the gradient descent subsystem, not of the ABR relational field.
+  (b) The ABR kernel specifies no initialization protocol; Xavier is the standard choice for
+      linear projections trained with cross-entropy loss.
+  (c) This component is fully isolated: Xavier affects only the starting state of W_O. All
+      relational quantities (A[e], B[e], R[e], ρ_acc, M) are derived without any reference to W_O
+      or its initialization.
+Xavier initialization is an admitted legacy component, isolated to W_O, alongside Adam and
+cross-entropy loss.
 
 The relational field (ρ_acc in EdgeStore) is not updated by backprop.
 ABR decouples representation accumulation (topology formation) from

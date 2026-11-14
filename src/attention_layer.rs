@@ -1,7 +1,7 @@
 // attention_layer.rs — Metatron Dynamics, Inc.
 // ABR Relational Attention — Attention Layer V1.0
 //
-// Grounding: declaration.rs V2.0, streaming.rs V1.0, operators.rs V7
+// Grounding: declaration.rs V5.0, streaming.rs V1.0, operators.rs V7 (Kernel V9)
 //
 // THE ARCHITECTURAL CLAIM:
 //   The ABR relational field IS an attention mechanism.

@@ -1,7 +1,16 @@
 // output_projection.rs — Metatron Dynamics, Inc.
 // ABR Relational Attention — Output Projection W_O V1.0
 //
-// Grounding: declaration.rs V2.0, layer_stack.rs V1.0
+// Grounding: declaration.rs V5.0, layer_stack.rs V1.0, DECLARATION.md V5.0 §W_O
+//
+// LEGACY MATH DECLARATION (DECLARATION.md V5.0, wo_demo scope):
+//   This module uses gradient descent and the Adam optimizer (Kingma & Ba, 2014).
+//   Adam is explicitly declared as the W_O training mechanism in DECLARATION.md V5.0.
+//   Cross-entropy loss with log-softmax is used for W_O training only.
+//   Xavier/Glorot initialization (Glorot & Bengio, 2010) is used in new_random().
+//
+//   These are admitted legacy components, isolated to W_O.  Every other quantity
+//   in ABR (A, B, R, ρ_acc, M) is derived without gradient descent.
 //
 // W_O IS THE ONLY LEARNED PARAMETER IN ABR RELATIONAL ATTENTION.
 //

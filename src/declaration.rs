@@ -1,5 +1,5 @@
 // declaration.rs — Metatron Dynamics, Inc.
-// ABR Relational Attention — V7 Domain and Measurement Declaration V2.0
+// ABR Relational Attention — V9 Domain and Measurement Declaration V5.0
 //
 // Grounding: operators.rs V7, DECLARATION.md V2.0 (2026-08-21)
 //

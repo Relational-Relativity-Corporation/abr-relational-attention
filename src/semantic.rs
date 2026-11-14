@@ -1,7 +1,7 @@
 // semantic.rs — Metatron Dynamics, Inc.
 // ABR Semantic Bridge — V1.0
 //
-// Grounding: declaration.rs V2.0, multi_head.rs V1.0
+// Grounding: declaration.rs V5.0, multi_head.rs V1.0, DECLARATION.md V5.0 (OC-RA-8,10,11 CLOSED)
 //
 // PURPOSE:
 //   Replace the synthetic identity-basis M with pre-trained semantic embeddings.

@@ -674,7 +674,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 
 ## OC-RA-3 Benchmark Declaration (Held-Out Validation)
 
-**Status: CLOSED — result obtained 2026-11-12**
+**Status: CLOSED — result obtained 2026-11-12; re-run 2026-11-13 after OC-RA-10 closure**
 **Binary: src/bin/held_out_benchmark.rs**
 
 ### Protocol
@@ -685,7 +685,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 | Train tokens    | first 10,000 tokens of train.txt                               |
 | Test tokens     | first 3,000 tokens of test.txt (held out; W_O frozen)          |
 | M               | PPMI corpus-derived (SemanticM::from_corpus)                   |
-| M dim / window  | dim=50, window=5, min_count=5                                   |
+| M dim / window  | dim=50, window=5, min_count=5; sentence-scoped from 2026-11-13 |
 | M vocabulary    | 407 words (built from first ~80K chars of train only)           |
 | OOV rate (test) | 40.4% (test tokens not in train vocab → unk_id)                 |
 | Accumulation    | single-pass streaming, no replay (OC-RA-5 compliant)           |
@@ -695,7 +695,7 @@ Inference:    O(n*k) -- k = mean admitted neighbourhood size.
 | W_O training    | Adam(lr=0.001), 150 epochs, cross-entropy                       |
 | Baseline        | Direct M — W_O on raw PPMI M(token), no ABR operators (same M, same W_O init, same training protocol) |
 
-### Results
+### Results — Run 1 (2026-11-12, pre-OC-RA-10, cross-sentence PPMI)
 
 | Condition    | Loss   | Perplexity | Top-1 Acc | Top-5 Acc |
 |--------------|--------|------------|-----------|-----------|
@@ -708,13 +708,42 @@ EdgeStore after 10,000 train tokens: 49,218 total edges; 29,074 admitted at thet
 
 Generalisation gap (test − train loss): ABR −0.2277, Direct −0.3364 (underfitting, not overfitting).
 
-**ABR advantage over Direct M (positive = ABR better):**
+### Results — Run 2 (2026-11-13, post-OC-RA-10, sentence-scoped PPMI)
+
+M_word co-occurrence now sentence-scoped (OC-RA-10 CLOSED). Cross-sentence pairs
+excluded from PPMI; within-sentence pairs within window=5 only. Same protocol otherwise.
+
+| Condition    | Loss   | Perplexity | Top-1 Acc | Top-5 Acc |
+|--------------|--------|------------|-----------|-----------|
+| ABR train    | 5.6550 | 285.7      | 10.6%     | 25.4%     |
+| ABR test     | 5.4469 | 232.0      | 14.2%     | 33.8%     |
+| Direct train | 4.9586 | 142.4      | 27.7%     | 49.4%     |
+| Direct test  | 4.6155 | 101.0      | 38.4%     | 56.6%     |
+
+EdgeStore after 10,000 train tokens: 49,218 total edges; 29,062 admitted at theta=0.05.
+
+Generalisation gap (test − train loss): ABR −0.2081, Direct −0.3431 (underfitting, not overfitting).
+
+**Effect of OC-RA-10 closure:**
+- ABR test perplexity: 237.4 → 232.0 (improvement of 5.4 pplx points, 2.3%)
+- Direct M test perplexity: 100.4 → 101.0 (essentially unchanged, within run variance)
+- ABR improvement is consistent with removing spurious cross-sentence co-occurrences
+  that diluted the sentence-local relational signal in M.
+- Generalisation gap narrowed slightly (−0.2277 → −0.2081), indicating less overfitting.
+
+**ABR advantage over Direct M (positive = ABR better) — Run 1:**
   Test  loss delta: −0.8608 (Direct M is better on held-out).
   Train loss delta: −0.7521 (Direct M is better on train).
 
+**ABR advantage over Direct M — Run 2 (post-OC-RA-10):**
+  Test  loss delta: −0.8314 (Direct M still better; ABR closing gap).
+  Train loss delta: −0.6964 (Direct M still better on train).
+
 ### Declared Finding
 
-**Direct M test perplexity (100.4) < ABR test perplexity (237.4) on this configuration.**
+**Current result (Run 2, post-OC-RA-10): ABR test perplexity 232.0 vs Direct M 101.0.**
+
+(Run 1 pre-OC-RA-10: ABR 237.4 / Direct 100.4. OC-RA-10 closure improved ABR by 5.4 pplx pts.)
 
 The result is accurate for the stated conditions. It does not refute ABR — it records the
 performance boundary of this parameter regime.

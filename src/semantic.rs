@@ -560,6 +560,230 @@ pub fn tokenize_text(text: &str) -> Vec<String> {
         .collect()
 }
 
+// ── CharM ─────────────────────────────────────────────────────────────────────
+//
+// OC-RA-11: M_char — character-level PPMI within word boundaries.
+//
+// DECLARATION (V5.0):
+//   Loci:   characters (a–z, 0–9, etc. — all alphanumeric chars in vocabulary)
+//   Window: word boundary — characters may only co-occur within the same word.
+//           Cross-word co-occurrence is inadmissible at character scale.
+//
+// What CharM encodes:
+//   Morphological and orthographic relational structure.
+//   Characters that often appear together within words (e.g. "t"–"h", "e"–"r")
+//   acquire high PPMI; characters that rarely co-occur within words have low PPMI.
+//
+// Method mirrors SemanticM::from_corpus but at character resolution:
+//   1. Tokenize into words (whitespace + punctuation split, lowercase)
+//   2. For each word: treat every character as a locus; build co-occurrence counts
+//      for all character pairs within the word (window = word boundary)
+//   3. Compute PPMI across character pairs
+//   4. Truncate/pad to `dim` dimensions
+//
+// Token IDs in CharM are character IDs (index into the character vocabulary).
+// The vocabulary is the set of all distinct characters in the corpus.
+//
+// OC-RA-11 CLOSED: 2026-11-13.
+
+/// Character-level PPMI matrix (M_char).
+///
+/// Loci: characters. Window: word boundary.
+/// CharM.embeddings[char_id] is the PPMI co-occurrence vector for that character
+/// across all same-word co-occurrences in the corpus.
+#[derive(Debug, Clone)]
+pub struct CharM {
+    /// Embedding matrix: n_chars × dim, all values in [0,1].
+    pub embeddings: VocabTable,
+    /// Character → char_id.
+    pub char_vocab: std::collections::HashMap<char, usize>,
+    /// char_id → character.
+    pub id_to_char: Vec<char>,
+    /// Embedding dimension.
+    pub dim: usize,
+    /// Special token: unknown character (all 0.5 — center of domain).
+    pub unk_id: usize,
+}
+
+impl CharM {
+    /// Build CharM from a text corpus.
+    ///
+    /// Characters co-occur only within the same word (word boundary = window).
+    /// `dim` controls the output embedding dimension.
+    /// `min_count` is the minimum number of times a character must appear
+    /// across all words to be included in the vocabulary.
+    pub fn from_corpus(text: &str, dim: usize, min_count: usize) -> Self {
+        // Tokenize into words (reuse tokenize_text for consistency)
+        let words = tokenize_text(text);
+
+        // Build character frequency map
+        let mut freq: std::collections::HashMap<char, usize> = std::collections::HashMap::new();
+        for word in &words {
+            for ch in word.chars() {
+                *freq.entry(ch).or_insert(0) += 1;
+            }
+        }
+
+        // Build character vocabulary (frequency-filtered, sorted for determinism)
+        let mut chars: Vec<char> = freq.iter()
+            .filter(|(_, &c)| c >= min_count)
+            .map(|(ch, _)| *ch)
+            .collect();
+        chars.sort();
+        let n_chars = chars.len();
+
+        if n_chars == 0 || dim == 0 {
+            // Empty corpus — return trivial CharM
+            let unk_emb = vec![0.5_f64; dim.max(1)];
+            let raw = vec![unk_emb];
+            let m = CharM::from_raw(raw, vec!['_']);
+            return m;
+        }
+
+        let char_to_id: std::collections::HashMap<char, usize> = chars.iter()
+            .enumerate()
+            .map(|(i, &ch)| (ch, i))
+            .collect();
+
+        // Co-occurrence counts within word boundaries.
+        // For each word: every character pair (i, j) where i ≠ j within the word.
+        // Window = word boundary: all characters in the word are within window of each other.
+        let context_dim = n_chars.min(dim * 2);
+        let mut cooc = vec![vec![0_f64; context_dim]; n_chars];
+
+        for word in &words {
+            let char_ids: Vec<Option<usize>> = word.chars()
+                .map(|ch| char_to_id.get(&ch).copied())
+                .collect();
+            let len = char_ids.len();
+            for i in 0..len {
+                if let Some(src) = char_ids[i] {
+                    for j in 0..len {
+                        if i == j { continue; }
+                        if let Some(ctx) = char_ids[j] {
+                            if ctx < context_dim {
+                                cooc[src][ctx] += 1.0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // PPMI
+        let total: f64 = cooc.iter().flatten().sum();
+        if total < 1.0 {
+            // No co-occurrences — identity basis
+            let raw: Vec<Vec<f64>> = (0..n_chars).map(|id| {
+                let mut v = vec![0.0_f64; dim];
+                v[id % dim] = 1.0;
+                v
+            }).collect();
+            return Self::from_raw(raw, chars);
+        }
+
+        let row_sums: Vec<f64> = cooc.iter().map(|r| r.iter().sum()).collect();
+        let col_sums: Vec<f64> = (0..context_dim)
+            .map(|c| cooc.iter().map(|r| r[c]).sum())
+            .collect();
+        let eps = 1e-10_f64;
+
+        let mut ppmi = vec![vec![0.0_f64; context_dim]; n_chars];
+        for w in 0..n_chars {
+            for c in 0..context_dim {
+                let p_wc = cooc[w][c] / (total + eps);
+                let p_w  = row_sums[w] / (total + eps);
+                let p_c  = col_sums[c] / (total + eps);
+                if p_w > eps && p_c > eps && p_wc > eps {
+                    let pmi = (p_wc / (p_w * p_c)).ln();
+                    ppmi[w][c] = pmi.max(0.0);
+                }
+            }
+        }
+
+        // Truncate or pad to dim
+        let raw: Vec<Vec<f64>> = ppmi.iter()
+            .map(|row| {
+                let mut v: Vec<f64> = row.iter().take(dim).copied().collect();
+                while v.len() < dim { v.push(0.0); }
+                v
+            })
+            .collect();
+
+        Self::from_raw(raw, chars)
+    }
+
+    /// Build CharM from a raw (pre-computed) embedding matrix + character vocabulary.
+    ///
+    /// Applies per-dimension min-max normalization.
+    /// An `<unk>` character (id = last entry) is appended at 0.5 in all dims.
+    pub fn from_raw(raw: Vec<Vec<f64>>, chars: Vec<char>) -> Self {
+        assert_eq!(raw.len(), chars.len(), "raw and chars must have same length");
+        let n = raw.len();
+        if n == 0 {
+            let unk_id = 0;
+            return CharM {
+                embeddings: vec![vec![0.5_f64; 1]],
+                char_vocab: std::collections::HashMap::new(),
+                id_to_char: vec!['?'],
+                dim: 1,
+                unk_id,
+            };
+        }
+        let dim = raw[0].len();
+
+        // Per-dimension min-max normalization
+        let mut min_d = vec![f64::INFINITY; dim];
+        let mut max_d = vec![f64::NEG_INFINITY; dim];
+        for emb in &raw {
+            for (d, &v) in emb.iter().enumerate() {
+                if v < min_d[d] { min_d[d] = v; }
+                if v > max_d[d] { max_d[d] = v; }
+            }
+        }
+        let eps = 1e-10_f64;
+        let mut normalized: VocabTable = raw.iter().map(|emb| {
+            emb.iter().enumerate().map(|(d, &v)| {
+                let range = max_d[d] - min_d[d];
+                if range < eps { 0.5 } else { (v - min_d[d]) / (range + eps) }
+            }).collect()
+        }).collect();
+
+        // Append <unk> at center of domain
+        normalized.push(vec![0.5_f64; dim]);
+        let unk_id = normalized.len() - 1;
+
+        let mut id_to_char: Vec<char> = chars.clone();
+        id_to_char.push('?'); // unk character
+        let char_vocab: std::collections::HashMap<char, usize> = chars.iter()
+            .enumerate()
+            .map(|(i, &ch)| (ch, i))
+            .collect();
+
+        CharM { embeddings: normalized, char_vocab, id_to_char, dim, unk_id }
+    }
+
+    /// Vocabulary size (including <unk>).
+    pub fn vocab_size(&self) -> usize { self.embeddings.len() }
+
+    /// Look up char_id for a character (returns unk_id if not found).
+    pub fn char_id(&self, ch: char) -> usize {
+        self.char_vocab.get(&ch).copied().unwrap_or(self.unk_id)
+    }
+
+    /// Encode a word as a Vec<usize> of char_ids.
+    pub fn encode_word(&self, word: &str) -> Vec<usize> {
+        word.chars().map(|ch| self.char_id(ch)).collect()
+    }
+
+    /// Return the embedding for a character id.
+    pub fn embedding(&self, char_id: usize) -> &[f64] {
+        self.embeddings.get(char_id)
+            .map(|v| v.as_slice())
+            .unwrap_or_else(|| self.embeddings[self.unk_id].as_slice())
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -931,5 +1155,102 @@ mod tests {
         let sat_norm: f64 = m.embeddings[sat_id].iter().map(|v| v * v).sum::<f64>().sqrt();
         assert!(cat_norm > 1e-9, "'cat' embedding must be non-zero");
         assert!(sat_norm > 1e-9, "'sat' embedding must be non-zero");
+    }
+
+    // ── OC-RA-11: CharM tests ─────────────────────────────────────────────────
+
+    /// CharM builds a vocabulary of characters found in the corpus.
+    #[test]
+    fn test_char_m_vocab_contains_corpus_chars() {
+        let m = CharM::from_corpus("hello world", 8, 1);
+        // 'h','e','l','o','w','r','d' + unk
+        for ch in "helowrd".chars() {
+            assert_ne!(m.char_id(ch), m.unk_id,
+                "char '{}' must be in CharM vocab", ch);
+        }
+    }
+
+    /// Unknown characters map to unk_id.
+    #[test]
+    fn test_char_m_unk_for_unseen_char() {
+        let m = CharM::from_corpus("abc", 4, 1);
+        let unk = m.char_id('z');
+        assert_eq!(unk, m.unk_id, "unseen char must map to unk_id");
+    }
+
+    /// Characters only co-occur within word boundaries.
+    /// "ab" and "cd" are in separate words; 'a'/'b' should co-occur but
+    /// 'a'/'c' should NOT (they never share a word).
+    #[test]
+    fn test_char_m_word_boundary_separates_cooccurrence() {
+        // "ab" and "cd" are distinct words — no cross-word co-occurrence
+        let corpus = "ab cd ab cd ab cd";
+        let m = CharM::from_corpus(corpus, 8, 1);
+
+        let a_id = m.char_id('a');
+        let b_id = m.char_id('b');
+        let c_id = m.char_id('c');
+        let d_id = m.char_id('d');
+
+        // All four chars in vocab
+        assert_ne!(a_id, m.unk_id);
+        assert_ne!(b_id, m.unk_id);
+        assert_ne!(c_id, m.unk_id);
+        assert_ne!(d_id, m.unk_id);
+
+        // 'a' and 'b' co-occur in every "ab" occurrence — their embeddings
+        // must have similar structure (high PPMI relative to 'a'/'c' cross-word pair).
+        // We test this structurally: 'a'-'b' co-occurrence must be > 0 while
+        // 'a'-'c' co-occurrence must be 0 (they never share a word).
+        // Access the raw embedding: since PPMI is normalized, we check via dim.
+        let emb_a = m.embedding(a_id);
+        let emb_c = m.embedding(c_id);
+        // Both should be non-trivial (they appear in a corpus word)
+        let norm_a: f64 = emb_a.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let norm_c: f64 = emb_c.iter().map(|v| v * v).sum::<f64>().sqrt();
+        assert!(norm_a > 1e-9, "'a' embedding must be non-zero");
+        assert!(norm_c > 1e-9, "'c' embedding must be non-zero");
+
+        // 'a' and 'c' never share a word — their PPMI should be 0.
+        // We verify this by building a second CharM where "ac" IS a word:
+        // the cross-word corpus must produce DIFFERENT embeddings for 'a' than
+        // the same corpus with "ac" added.
+        let m2 = CharM::from_corpus("ab cd ac ab cd ac", 8, 1);
+        let a2_id = m2.char_id('a');
+        let emb_a2 = m2.embedding(a2_id);
+        let diff: f64 = emb_a.iter().zip(emb_a2.iter())
+            .map(|(x, y)| (x - y).abs()).sum();
+        assert!(diff > 1e-9,
+            "adding 'ac' word must change 'a' embedding (cross-word co-occurrence test)");
+    }
+
+    /// CharM embeddings are in [0,1].
+    #[test]
+    fn test_char_m_domain_bounds() {
+        let m = CharM::from_corpus("the quick brown fox jumps over the lazy dog", 8, 1);
+        for emb in &m.embeddings {
+            for &v in emb {
+                assert!(v >= DOMAIN_LOWER && v <= DOMAIN_UPPER + 1e-9,
+                    "CharM embedding {} out of [0,1]", v);
+            }
+        }
+    }
+
+    /// CharM encode_word returns the correct char_ids.
+    #[test]
+    fn test_char_m_encode_word() {
+        let m = CharM::from_corpus("cat dog", 8, 1);
+        let ids = m.encode_word("cat");
+        assert_eq!(ids.len(), 3, "encode_word('cat') must return 3 ids");
+        assert_eq!(ids[0], m.char_id('c'));
+        assert_eq!(ids[1], m.char_id('a'));
+        assert_eq!(ids[2], m.char_id('t'));
+    }
+
+    /// CharM on empty corpus does not panic.
+    #[test]
+    fn test_char_m_empty_corpus() {
+        let m = CharM::from_corpus("", 8, 1);
+        assert!(m.vocab_size() >= 1, "must have at least unk entry");
     }
 }

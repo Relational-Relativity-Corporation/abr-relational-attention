@@ -784,6 +784,365 @@ impl CharM {
     }
 }
 
+// ── SentM / ParaM ─────────────────────────────────────────────────────────────
+//
+// OC-RA-8: Higher-level connection scopes — M_sent and M_para.
+//
+// DECLARATION (V5.0):
+//
+//   M_sent:
+//     Loci:   sentences (each sentence is one unit; represented by mean M_word embedding)
+//     Window: paragraph boundary — sentences co-occur only within the same paragraph.
+//             Cross-paragraph pairs are inadmissible at sentence scale.
+//     What M_sent encodes: discourse-level relational structure — which sentence
+//     types follow each other within paragraphs.
+//
+//   M_para:
+//     Loci:   paragraphs (each paragraph is one unit; represented by mean M_word embedding)
+//     Window: volume boundary — all paragraphs within the text are within window.
+//     What M_para encodes: volume-level relational structure — which paragraph
+//     types appear together within a document.
+//
+// Method (both):
+//   1. Tokenize text into paragraphs (split on "\n\n").
+//   2. For M_sent: within each paragraph, build sentence co-occurrence counts
+//      (all sentence pairs within the paragraph are within window).
+//      For M_para: all paragraph pairs within the volume are within window.
+//   3. Each sentence/paragraph is represented by a unique integer index.
+//      PPMI is computed over index co-occurrence — yielding a structural
+//      "positional PPMI" that reflects which units appear near each other.
+//   4. Sentence/paragraph loci are associated with their mean M_word embedding
+//      as the initializing representation; PPMI structure is then overlaid.
+//
+// OC-RA-8 CLOSED: 2026-11-13.
+
+/// Split text into paragraphs (split on blank lines `\n\n`).
+/// Each paragraph is itself split into sentences.
+/// Returns Vec<Vec<Vec<String>>> = paragraphs × sentences × tokens.
+pub fn tokenize_into_paragraphs(text: &str) -> Vec<Vec<Vec<String>>> {
+    text.split("\n\n")
+        .map(|para| {
+            let sents = tokenize_into_sentences(para);
+            sents.into_iter().filter(|s| !s.is_empty()).collect()
+        })
+        .filter(|para: &Vec<Vec<String>>| !para.is_empty())
+        .collect()
+}
+
+/// Sentence-level PPMI matrix (M_sent).
+///
+/// Loci: sentences. Window: paragraph boundary.
+/// Two sentences co-occur iff they are in the same paragraph.
+///
+/// Each sentence is identified by a unique index (0..n_sentences).
+/// The embedding matrix is n_sentences × dim.
+/// Each row is the PPMI co-occurrence vector for that sentence index
+/// across all same-paragraph co-occurrences, normalized to [0,1].
+///
+/// Additionally, `mean_embeddings` stores the mean M_word token embedding
+/// for each sentence (requires a SemanticM to be passed at build time).
+#[derive(Debug, Clone)]
+pub struct SentM {
+    /// PPMI co-occurrence vectors: n_sentences × dim, all in [0,1].
+    pub embeddings: VocabTable,
+    /// Mean M_word embedding for each sentence: n_sentences × word_dim.
+    /// Empty if no SemanticM was provided.
+    pub mean_word_embeddings: VocabTable,
+    /// Original sentence tokens (Vec<String>) for each sentence.
+    pub sentences: Vec<Vec<String>>,
+    /// Embedding dimension (PPMI dimension).
+    pub dim: usize,
+    /// Special token: unknown sentence (all 0.5).
+    pub unk_id: usize,
+}
+
+impl SentM {
+    /// Build SentM from text.
+    ///
+    /// `dim` is the PPMI embedding dimension for the sentence-level co-occurrence vectors.
+    /// `sem` is an optional M_word used to compute mean word embeddings per sentence.
+    pub fn from_corpus(text: &str, dim: usize, sem: Option<&SemanticM>) -> Self {
+        let paragraphs = tokenize_into_paragraphs(text);
+
+        // Flatten: collect all sentences with paragraph labels
+        // para_assignments[sent_idx] = para_idx
+        let mut all_sentences: Vec<Vec<String>> = Vec::new();
+        let mut para_assignments: Vec<usize> = Vec::new();
+
+        for (para_idx, para) in paragraphs.iter().enumerate() {
+            for sent in para {
+                all_sentences.push(sent.clone());
+                para_assignments.push(para_idx);
+            }
+        }
+
+        let n_sents = all_sentences.len();
+        if n_sents == 0 || dim == 0 {
+            return SentM {
+                embeddings: vec![vec![0.5_f64; dim.max(1)]],
+                mean_word_embeddings: vec![],
+                sentences: vec![],
+                dim: dim.max(1),
+                unk_id: 0,
+            };
+        }
+
+        // Build paragraph-grouped sentence sets for co-occurrence
+        let n_paras = paragraphs.len();
+        let mut para_sent_lists: Vec<Vec<usize>> = vec![Vec::new(); n_paras];
+        for (sent_idx, &para_idx) in para_assignments.iter().enumerate() {
+            para_sent_lists[para_idx].push(sent_idx);
+        }
+
+        // Co-occurrence: two sentences co-occur iff in same paragraph.
+        // Window = paragraph boundary: all sentence pairs within a paragraph.
+        let context_dim = n_sents.min(dim * 2);
+        let mut cooc = vec![vec![0_f64; context_dim]; n_sents];
+        for sent_list in &para_sent_lists {
+            for &si in sent_list {
+                for &sj in sent_list {
+                    if si == sj { continue; }
+                    if sj < context_dim {
+                        cooc[si][sj] += 1.0;
+                    }
+                }
+            }
+        }
+
+        // PPMI
+        let total: f64 = cooc.iter().flatten().sum();
+        let raw: Vec<Vec<f64>> = if total < 1.0 {
+            // No co-occurrences — identity basis
+            (0..n_sents).map(|id| {
+                let mut v = vec![0.0_f64; dim];
+                v[id % dim] = 1.0;
+                v
+            }).collect()
+        } else {
+            let row_sums: Vec<f64> = cooc.iter().map(|r| r.iter().sum()).collect();
+            let col_sums: Vec<f64> = (0..context_dim)
+                .map(|c| cooc.iter().map(|r| r[c]).sum())
+                .collect();
+            let eps = 1e-10_f64;
+            let ppmi: Vec<Vec<f64>> = (0..n_sents).map(|w| {
+                (0..context_dim).map(|c| {
+                    let p_wc = cooc[w][c] / (total + eps);
+                    let p_w  = row_sums[w] / (total + eps);
+                    let p_c  = col_sums[c] / (total + eps);
+                    if p_w > eps && p_c > eps && p_wc > eps {
+                        ((p_wc / (p_w * p_c)).ln()).max(0.0)
+                    } else { 0.0 }
+                }).collect()
+            }).collect();
+            ppmi.iter().map(|row| {
+                let mut v: Vec<f64> = row.iter().take(dim).copied().collect();
+                while v.len() < dim { v.push(0.0); }
+                v
+            }).collect()
+        };
+
+        // Per-dimension min-max normalization
+        let dim_actual = raw[0].len();
+        let mut min_d = vec![f64::INFINITY; dim_actual];
+        let mut max_d = vec![f64::NEG_INFINITY; dim_actual];
+        for emb in &raw {
+            for (d, &v) in emb.iter().enumerate() {
+                if v < min_d[d] { min_d[d] = v; }
+                if v > max_d[d] { max_d[d] = v; }
+            }
+        }
+        let eps = 1e-10_f64;
+        let mut embeddings: VocabTable = raw.iter().map(|emb| {
+            emb.iter().enumerate().map(|(d, &v)| {
+                let range = max_d[d] - min_d[d];
+                if range < eps { 0.5 } else { (v - min_d[d]) / (range + eps) }
+            }).collect()
+        }).collect();
+        // Append unk
+        embeddings.push(vec![0.5_f64; dim_actual]);
+        let unk_id = embeddings.len() - 1;
+
+        // Mean word embeddings per sentence (if sem provided)
+        let mean_word_embeddings: VocabTable = if let Some(sem) = sem {
+            all_sentences.iter().map(|sent| {
+                let ids: Vec<usize> = sent.iter().map(|w| sem.token_id(w)).collect();
+                if ids.is_empty() { return vec![0.5_f64; sem.dim]; }
+                let mut mean = vec![0.0_f64; sem.dim];
+                for &id in &ids {
+                    let emb = &sem.embeddings[id.min(sem.embeddings.len() - 1)];
+                    for (d, &v) in emb.iter().enumerate() { mean[d] += v; }
+                }
+                mean.iter_mut().for_each(|v| *v /= ids.len() as f64);
+                mean
+            }).collect()
+        } else { vec![] };
+
+        SentM {
+            embeddings,
+            mean_word_embeddings,
+            sentences: all_sentences,
+            dim: dim_actual,
+            unk_id,
+        }
+    }
+
+    /// Number of sentences (including unk).
+    pub fn vocab_size(&self) -> usize { self.embeddings.len() }
+
+    /// Return the PPMI embedding for a sentence index.
+    pub fn embedding(&self, sent_idx: usize) -> &[f64] {
+        self.embeddings.get(sent_idx)
+            .map(|v| v.as_slice())
+            .unwrap_or_else(|| self.embeddings[self.unk_id].as_slice())
+    }
+
+    /// Return the mean word embedding for a sentence index.
+    pub fn mean_word_embedding(&self, sent_idx: usize) -> Option<&[f64]> {
+        self.mean_word_embeddings.get(sent_idx).map(|v| v.as_slice())
+    }
+}
+
+/// Paragraph-level PPMI matrix (M_para).
+///
+/// Loci: paragraphs. Window: volume boundary (all paragraphs co-occur with all others).
+/// Each paragraph is identified by a unique index (0..n_paras).
+/// PPMI is computed over paragraph co-occurrence within the volume.
+///
+/// Structurally, M_para records which paragraph positions occur together
+/// in the volume — encoding document-level relational structure.
+#[derive(Debug, Clone)]
+pub struct ParaM {
+    /// PPMI co-occurrence vectors: n_paragraphs × dim, all in [0,1].
+    pub embeddings: VocabTable,
+    /// Mean M_word embedding for each paragraph: n_paragraphs × word_dim.
+    pub mean_word_embeddings: VocabTable,
+    /// Original paragraph text (flattened sentences) for each paragraph.
+    pub paragraphs: Vec<Vec<Vec<String>>>,
+    /// Embedding dimension.
+    pub dim: usize,
+    /// Special token: unknown paragraph (all 0.5).
+    pub unk_id: usize,
+}
+
+impl ParaM {
+    /// Build ParaM from text.
+    ///
+    /// `dim` is the PPMI embedding dimension.
+    /// `sem` is an optional M_word used to compute mean word embeddings per paragraph.
+    pub fn from_corpus(text: &str, dim: usize, sem: Option<&SemanticM>) -> Self {
+        let paragraphs = tokenize_into_paragraphs(text);
+        let n_paras = paragraphs.len();
+
+        if n_paras == 0 || dim == 0 {
+            return ParaM {
+                embeddings: vec![vec![0.5_f64; dim.max(1)]],
+                mean_word_embeddings: vec![],
+                paragraphs: vec![],
+                dim: dim.max(1),
+                unk_id: 0,
+            };
+        }
+
+        // Co-occurrence: all paragraph pairs within the volume (window = volume boundary).
+        let context_dim = n_paras.min(dim * 2);
+        let mut cooc = vec![vec![0_f64; context_dim]; n_paras];
+        for pi in 0..n_paras {
+            for pj in 0..n_paras {
+                if pi == pj { continue; }
+                if pj < context_dim {
+                    cooc[pi][pj] += 1.0;
+                }
+            }
+        }
+
+        // PPMI
+        let total: f64 = cooc.iter().flatten().sum();
+        let raw: Vec<Vec<f64>> = if total < 1.0 {
+            (0..n_paras).map(|id| {
+                let mut v = vec![0.0_f64; dim];
+                v[id % dim] = 1.0;
+                v
+            }).collect()
+        } else {
+            let row_sums: Vec<f64> = cooc.iter().map(|r| r.iter().sum()).collect();
+            let col_sums: Vec<f64> = (0..context_dim)
+                .map(|c| cooc.iter().map(|r| r[c]).sum())
+                .collect();
+            let eps = 1e-10_f64;
+            let ppmi: Vec<Vec<f64>> = (0..n_paras).map(|w| {
+                (0..context_dim).map(|c| {
+                    let p_wc = cooc[w][c] / (total + eps);
+                    let p_w  = row_sums[w] / (total + eps);
+                    let p_c  = col_sums[c] / (total + eps);
+                    if p_w > eps && p_c > eps && p_wc > eps {
+                        ((p_wc / (p_w * p_c)).ln()).max(0.0)
+                    } else { 0.0 }
+                }).collect()
+            }).collect();
+            ppmi.iter().map(|row| {
+                let mut v: Vec<f64> = row.iter().take(dim).copied().collect();
+                while v.len() < dim { v.push(0.0); }
+                v
+            }).collect()
+        };
+
+        // Normalize
+        let dim_actual = raw[0].len();
+        let mut min_d = vec![f64::INFINITY; dim_actual];
+        let mut max_d = vec![f64::NEG_INFINITY; dim_actual];
+        for emb in &raw { for (d, &v) in emb.iter().enumerate() { if v < min_d[d] { min_d[d] = v; } if v > max_d[d] { max_d[d] = v; } } }
+        let eps = 1e-10_f64;
+        let mut embeddings: VocabTable = raw.iter().map(|emb| {
+            emb.iter().enumerate().map(|(d, &v)| {
+                let range = max_d[d] - min_d[d];
+                if range < eps { 0.5 } else { (v - min_d[d]) / (range + eps) }
+            }).collect()
+        }).collect();
+        embeddings.push(vec![0.5_f64; dim_actual]);
+        let unk_id = embeddings.len() - 1;
+
+        // Mean word embeddings per paragraph
+        let mean_word_embeddings: VocabTable = if let Some(sem) = sem {
+            paragraphs.iter().map(|para| {
+                let all_tokens: Vec<usize> = para.iter()
+                    .flat_map(|sent| sent.iter().map(|w| sem.token_id(w)))
+                    .collect();
+                if all_tokens.is_empty() { return vec![0.5_f64; sem.dim]; }
+                let mut mean = vec![0.0_f64; sem.dim];
+                for &id in &all_tokens {
+                    let emb = &sem.embeddings[id.min(sem.embeddings.len() - 1)];
+                    for (d, &v) in emb.iter().enumerate() { mean[d] += v; }
+                }
+                mean.iter_mut().for_each(|v| *v /= all_tokens.len() as f64);
+                mean
+            }).collect()
+        } else { vec![] };
+
+        ParaM {
+            embeddings,
+            mean_word_embeddings,
+            paragraphs,
+            dim: dim_actual,
+            unk_id,
+        }
+    }
+
+    /// Number of paragraphs (including unk).
+    pub fn vocab_size(&self) -> usize { self.embeddings.len() }
+
+    /// Return the PPMI embedding for a paragraph index.
+    pub fn embedding(&self, para_idx: usize) -> &[f64] {
+        self.embeddings.get(para_idx)
+            .map(|v| v.as_slice())
+            .unwrap_or_else(|| self.embeddings[self.unk_id].as_slice())
+    }
+
+    /// Return the mean word embedding for a paragraph index.
+    pub fn mean_word_embedding(&self, para_idx: usize) -> Option<&[f64]> {
+        self.mean_word_embeddings.get(para_idx).map(|v| v.as_slice())
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1252,5 +1611,120 @@ mod tests {
     fn test_char_m_empty_corpus() {
         let m = CharM::from_corpus("", 8, 1);
         assert!(m.vocab_size() >= 1, "must have at least unk entry");
+    }
+
+    // ── OC-RA-8: SentM tests ──────────────────────────────────────────────────
+
+    /// SentM builds one entry per sentence.
+    #[test]
+    fn test_sent_m_sentence_count() {
+        // Two paragraphs with two sentences each = 4 sentences + 1 unk
+        let corpus = "First sentence. Second sentence.\n\nThird sentence. Fourth sentence.";
+        let m = SentM::from_corpus(corpus, 8, None);
+        assert_eq!(m.sentences.len(), 4, "must have 4 sentences");
+        assert_eq!(m.vocab_size(), 5, "4 sentences + 1 unk");
+    }
+
+    /// SentM embeddings are in [0,1].
+    #[test]
+    fn test_sent_m_domain_bounds() {
+        let corpus = "Alpha beta. Gamma delta.\n\nEpsilon zeta. Eta theta.";
+        let m = SentM::from_corpus(corpus, 8, None);
+        for emb in &m.embeddings {
+            for &v in emb {
+                assert!(v >= DOMAIN_LOWER && v <= DOMAIN_UPPER + 1e-9,
+                    "SentM embedding {} out of [0,1]", v);
+            }
+        }
+    }
+
+    /// Sentences in different paragraphs do not co-occur (paragraph boundary respected).
+    /// Sentences in the same paragraph do co-occur.
+    #[test]
+    fn test_sent_m_paragraph_boundary() {
+        // para1: "s1 s2" (two sentences); para2: "s3 s4" (two sentences)
+        // s1 and s2 must co-occur; s1 and s3 must NOT.
+        let corpus = "one two. three four.\n\nfive six. seven eight.";
+        let m_two_para = SentM::from_corpus(corpus, 8, None);
+        // All four sentences must exist
+        assert_eq!(m_two_para.sentences.len(), 4);
+
+        // Single-paragraph corpus: same 4 sentences but no paragraph break.
+        // Now all 4 sentences co-occur with each other.
+        let corpus_one = "one two. three four. five six. seven eight.";
+        let m_one_para = SentM::from_corpus(corpus_one, 8, None);
+        assert_eq!(m_one_para.sentences.len(), 4);
+
+        // The two-paragraph corpus must produce DIFFERENT embeddings than the
+        // one-paragraph corpus, because co-occurrence structure differs.
+        let diff: f64 = m_two_para.embeddings[0].iter()
+            .zip(m_one_para.embeddings[0].iter())
+            .map(|(a, b)| (a - b).abs()).sum();
+        assert!(diff > 1e-9,
+            "paragraph boundary must produce different co-occurrence structure");
+    }
+
+    /// SentM empty corpus does not panic.
+    #[test]
+    fn test_sent_m_empty_corpus() {
+        let m = SentM::from_corpus("", 8, None);
+        assert!(m.vocab_size() >= 1);
+    }
+
+    // ── OC-RA-8: ParaM tests ──────────────────────────────────────────────────
+
+    /// ParaM builds one entry per paragraph.
+    #[test]
+    fn test_para_m_paragraph_count() {
+        let corpus = "Para one sentence.\n\nPara two sentence.\n\nPara three sentence.";
+        let m = ParaM::from_corpus(corpus, 8, None);
+        assert_eq!(m.paragraphs.len(), 3, "must have 3 paragraphs");
+        assert_eq!(m.vocab_size(), 4, "3 paragraphs + 1 unk");
+    }
+
+    /// ParaM embeddings are in [0,1].
+    #[test]
+    fn test_para_m_domain_bounds() {
+        let corpus = "First para alpha beta.\n\nSecond para gamma delta.\n\nThird para epsilon.";
+        let m = ParaM::from_corpus(corpus, 8, None);
+        for emb in &m.embeddings {
+            for &v in emb {
+                assert!(v >= DOMAIN_LOWER && v <= DOMAIN_UPPER + 1e-9,
+                    "ParaM embedding {} out of [0,1]", v);
+            }
+        }
+    }
+
+    /// ParaM mean_word_embeddings populated when SemanticM provided.
+    #[test]
+    fn test_para_m_mean_word_embeddings_with_sem() {
+        let corpus = "cat sat mat.\n\ndog ran here.";
+        let sem = SemanticM::from_corpus(corpus, 8, 2, 1);
+        let m = ParaM::from_corpus(corpus, 8, Some(&sem));
+        assert_eq!(m.mean_word_embeddings.len(), m.paragraphs.len(),
+            "one mean embedding per paragraph");
+        for emb in &m.mean_word_embeddings {
+            for &v in emb {
+                assert!(v >= DOMAIN_LOWER && v <= DOMAIN_UPPER + 1e-9,
+                    "mean word embedding {} out of [0,1]", v);
+            }
+        }
+    }
+
+    /// ParaM empty corpus does not panic.
+    #[test]
+    fn test_para_m_empty_corpus() {
+        let m = ParaM::from_corpus("", 8, None);
+        assert!(m.vocab_size() >= 1);
+    }
+
+    /// tokenize_into_paragraphs splits on double newline.
+    #[test]
+    fn test_tokenize_into_paragraphs() {
+        let text = "First paragraph with two sentences. And more.\n\nSecond paragraph here.";
+        let paras = tokenize_into_paragraphs(text);
+        assert_eq!(paras.len(), 2, "must have 2 paragraphs");
+        assert_eq!(paras[0].len(), 2, "first paragraph has 2 sentences");
+        assert_eq!(paras[1].len(), 1, "second paragraph has 1 sentence");
     }
 }

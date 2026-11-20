@@ -224,34 +224,18 @@ impl StreamingField {
 
         // Build local token_id sequence for operator application
         let local_ids: Vec<usize> = window_loci.iter().map(|l| l.token_id).collect();
-
-        // Apply B → R (operator_b, then operator_r)
         let n_edges = edges.len();
-        let b_field = apply_operator_b(&edges, &local_ids, vocab, dim);
-        let r_field = apply_operator_r(&b_field, &edges, &local_ids, vocab, dim);
 
-        // Aggregate at target position (last in window = position).
+        // Apply B → R and aggregate at the target position (last in window = position).
         //
-        // DOMAIN MAINTENANCE: compute the MEAN R-field over admitted edges at
-        // the target position, not the sum.  Each R-vector component traces to
-        // M ∈ [0,1]^dim through declared operators, so the mean is bounded.
-        // A sum would be O(k) and violate D = [0,1]^dim as k grows.
-        // Analogous to softmax attention: output = Σ attn_weight · V, where
-        // Σ attn_weight = 1 (normalized).  Here: output = (1/k) Σ R[i→pos].
-        let mut output = vec![0.0_f64; dim];
-        let mut n_at_target = 0_usize;
-        for (ei, &(_, tp)) in edges.iter().enumerate() {
-            if tp == n_w - 1 {
-                for d in 0..dim {
-                    output[d] += r_field[ei * dim + d];
-                }
-                n_at_target += 1;
-            }
-        }
-        if n_at_target > 1 {
-            let inv = 1.0 / n_at_target as f64;
-            for v in &mut output { *v *= inv; }
-        }
+        // DOMAIN MAINTENANCE: the output is the MEAN R-field over admitted edges at the target
+        // position, not the sum, so it stays bounded in D as k grows (each R-vector component
+        // traces to M ∈ [0,1]^dim through declared operators). Analogous to softmax attention,
+        // where the weights sum to 1: here output = (1/k) Σ R[i→pos].
+        //
+        // Only R on edges ending at the target feeds the output, so R is evaluated there alone,
+        // using per-node sums of A (see relational_output_at_target). Same operators, same edges.
+        let output = relational_output_at_target(&edges, &local_ids, vocab, dim);
 
         (output, n_edges)
     }
@@ -312,6 +296,74 @@ fn operator_a_to_rho_n(pair: &RelationalPair, vocab: &VocabTable) -> f64 {
     RHO_BASE * chi / (1.0 + chi)
 }
 
+/// The R-field output at the target node (the last window position): the mean of R[e] over
+/// edges e = (s, t) with t = target, exactly as apply_operator_b → apply_operator_r followed by
+/// that mean, but evaluated only where the output needs it.
+///
+/// With out(n) = Σ_{g: src(g)=n} A[g], in(n) = Σ_{g: tgt(g)=n} A[g], deg_in(n) = |{g: tgt(g)=n}|:
+///   B[f]          = A[f] + out(tgt f)                          (succ(f) = edges leaving tgt f)
+///   Σ_succ(e) B   = Σ_{f: src f = t} B[f] = out(t) + Σ_{f: src f = t} out(tgt f)
+///   Σ_pred(e) B   = Σ_{f: tgt f = s} B[f] = in(s) + deg_in(s) · out(s)
+///   R[e]          = B[e] + ρ[s] · (Σ_succ(e) B − Σ_pred(e) B)
+/// ρ[n] = RHO_BASE · χ/(1+χ), maximised over edges incident on n, χ = max|A[e]| (as before).
+/// Cost O(n_edges · dim), against O(n_edges · degree · dim) for evaluating B and R on every edge.
+/// The sums are regrouped, so results agree with the full evaluation to floating-point rounding.
+fn relational_output_at_target(
+    edges: &[(usize, usize)],
+    local_ids: &[usize],
+    vocab: &VocabTable,
+    dim: usize,
+) -> Vec<f64> {
+    use crate::operators::RHO_BASE;
+    let n_nodes = local_ids.len();
+    let target = n_nodes - 1;
+    let mut out_sum = vec![0.0_f64; n_nodes * dim];
+    let mut in_sum = vec![0.0_f64; n_nodes * dim];
+    let mut deg_in = vec![0usize; n_nodes];
+    let mut rho_node = vec![0.0_f64; n_nodes];
+    for &(sp, tp) in edges {
+        let (vs, vt) = (&vocab[local_ids[sp]], &vocab[local_ids[tp]]);
+        let mut chi = 0.0_f64;
+        for d in 0..dim {
+            let a = vs[d] - vt[d];
+            out_sum[sp * dim + d] += a;
+            in_sum[tp * dim + d] += a;
+            chi = chi.max(a.abs());
+        }
+        deg_in[tp] += 1;
+        let rho = RHO_BASE * chi / (1.0 + chi);
+        if rho > rho_node[sp] { rho_node[sp] = rho; }
+        if rho > rho_node[tp] { rho_node[tp] = rho; }
+    }
+    // Σ_succ(e) B for every e ending at the target: the same vector for all of them.
+    let mut fwd = out_sum[target * dim..(target + 1) * dim].to_vec();
+    for &(sp, tp) in edges {
+        if sp == target {
+            for d in 0..dim { fwd[d] += out_sum[tp * dim + d]; }
+        }
+    }
+    let mut output = vec![0.0_f64; dim];
+    let mut n_at_target = 0usize;
+    let (vt, out_t) = (&vocab[local_ids[target]], &out_sum[target * dim..(target + 1) * dim]);
+    for &(sp, tp) in edges {
+        if tp != target { continue; }
+        let vs = &vocab[local_ids[sp]];
+        let rho = rho_node[sp];
+        let k = deg_in[sp] as f64;
+        for d in 0..dim {
+            let b_e = (vs[d] - vt[d]) + out_t[d];
+            let bwd = in_sum[sp * dim + d] + k * out_sum[sp * dim + d];
+            output[d] += b_e + rho * (fwd[d] - bwd);
+        }
+        n_at_target += 1;
+    }
+    if n_at_target > 1 {
+        let inv = 1.0 / n_at_target as f64;
+        for v in &mut output { *v *= inv; }
+    }
+    output
+}
+
 /// Apply operator B to a local edge list.
 /// B[e] = A[e] + Σ_{f ∈ succ(e)} A[f]
 ///
@@ -321,6 +373,7 @@ fn operator_a_to_rho_n(pair: &RelationalPair, vocab: &VocabTable) -> f64 {
 ///   (kernel_reference.md §11; operators.rs `succ(e) = out[edges[e].1]`)
 ///
 /// Returns flat Vec<f64> of shape [n_edges × dim].
+#[cfg(test)]
 fn apply_operator_b(
     edges: &[(usize, usize)],
     local_ids: &[usize],
@@ -370,6 +423,7 @@ fn apply_operator_b(
 ///   (kernel_reference.md §11; operators.rs lines 489-490, 563, 567)
 ///
 /// Returns flat Vec<f64> of shape [n_edges × dim].
+#[cfg(test)]
 fn apply_operator_r(
     b_flat: &[f64],
     edges: &[(usize, usize)],
@@ -439,6 +493,42 @@ fn apply_operator_r(
 mod tests {
     use super::*;
     use crate::declaration::{build_vocab_table, THETA_MIN};
+
+
+    /// relational_output_at_target equals the full B → R evaluation followed by the mean at the
+    /// target, to floating-point rounding, on admitted windows from a streamed field.
+    #[test]
+    fn output_at_target_matches_full_evaluation() {
+        let vocab = crate::declaration::build_vocab_table_seeded(200, 16, 11);
+        let mut f = StreamingField::new();
+        let mut s: u64 = 5;
+        let ids: Vec<usize> = (0..1500).map(|_| { s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); ((s >> 33) % 200) as usize }).collect();
+        f.arrive_sequence(&ids, &vocab);
+        let (dim, mut checked, mut worst) = (16, 0, 0.0_f64);
+        for pos in (0..ids.len()).step_by(7) {
+            for theta in [0.0, 0.05, 0.3] {
+                let ws = pos.saturating_sub(f.window);
+                let loci = &f.stream[ws..=pos];
+                let mut edges = vec![];
+                for j in 0..loci.len() { for i in 0..=j {
+                    if f.store.rho_acc_for_pair(loci[i].token_id, loci[j].token_id).is_some_and(|r| r >= theta) { edges.push((i, j)); }
+                }}
+                if edges.is_empty() { continue; }
+                let local: Vec<usize> = loci.iter().map(|l| l.token_id).collect();
+                let b = apply_operator_b(&edges, &local, &vocab, dim);
+                let r = apply_operator_r(&b, &edges, &local, &vocab, dim);
+                let mut full = vec![0.0; dim];
+                let mut n = 0;
+                for (ei, &(_, tp)) in edges.iter().enumerate() { if tp == loci.len() - 1 { for d in 0..dim { full[d] += r[ei * dim + d]; } n += 1; } }
+                if n > 1 { for v in &mut full { *v /= n as f64; } }
+                let fast = relational_output_at_target(&edges, &local, &vocab, dim);
+                for d in 0..dim { worst = worst.max((fast[d] - full[d]).abs() / full[d].abs().max(1.0)); }
+                checked += 1;
+            }
+        }
+        assert!(checked > 500, "too few windows checked: {checked}");
+        assert!(worst < 1e-10, "largest relative difference {worst:e}");
+    }
 
     fn small_vocab() -> VocabTable {
         build_vocab_table(8, 8)

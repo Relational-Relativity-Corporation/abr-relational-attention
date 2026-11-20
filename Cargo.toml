@@ -38,6 +38,10 @@ path = "src/bin/wo_demo.rs"
 name = "held_out_benchmark"
 path = "src/bin/held_out_benchmark.rs"
 
+[[bin]]
+name = "scaling_benchmark"
+path = "src/bin/scaling_benchmark.rs"
+
 [lib]
 name = "abr_relational_attention"
 path = "src/lib.rs"

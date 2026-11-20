@@ -202,16 +202,17 @@ impl StreamingField {
         let window_loci = &self.stream[window_start..=position];
         let n_w = window_loci.len();
 
-        // Build admitted edge list from window
-        let admitted = self.store.all_admitted_pairs_at_threshold(theta);
-        let admitted_set: std::collections::HashSet<(usize, usize)> =
-            admitted.into_iter().collect();
-
+        // Build admitted edge list from window.
+        //
+        // Each window pair is looked up directly in the EdgeStore: admitted when it has been
+        // observed and ρ_acc ≥ θ. This is the same rule all_admitted_pairs_at_threshold applies,
+        // so the edge list is identical, but the cost per call is O(W²) lookups instead of a scan
+        // of the whole field, so inference no longer slows as the field grows.
         let mut edges: Vec<(usize, usize)> = Vec::new(); // (local_src_pos, local_tgt_pos)
         for j_local in 0..n_w {
             for i_local in 0..=j_local {
-                let key = (window_loci[i_local].token_id, window_loci[j_local].token_id);
-                if admitted_set.contains(&key) {
+                let (s, t) = (window_loci[i_local].token_id, window_loci[j_local].token_id);
+                if self.store.rho_acc_for_pair(s, t).is_some_and(|r| r >= theta) {
                     edges.push((i_local, j_local));
                 }
             }
